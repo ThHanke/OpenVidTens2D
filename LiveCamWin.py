@@ -12,26 +12,36 @@ import AVTCam
 #import globals
 import config
 
+ID_CPROP=wx.NewId()
+
+
+
 class LiveCamWin(wx.Frame):
     def __init__(self):
         screensize=wx.Display().GetGeometry()
-        wx.Frame.__init__(self,None,wx.ID_ANY,title='LiveCamWin',pos=(0,0),size=(screensize[2]/2,screensize[3]/2),style= wx.BORDER_RAISED  | wx.DEFAULT_FRAME_STYLE )
+        wx.Frame.__init__(self,None,wx.ID_ANY,title='LiveCamWin',pos=(0,0),size=(screensize[2]/2,screensize[3]/2),style= wx.DEFAULT_FRAME_STYLE )
         self.status=self.CreateStatusBar()
         self.status.SetFieldsCount(2)
         self.status.SetStatusWidths([-1,65])
 
+        
+
         wx.EVT_CLOSE(self, self.OnClose)
+
+        menu=self.CreateMenu()
+        self.SetMenuBar(menu)
+
+        
 
         #startwerte
         self.caminterface=None
         self.datatoqueue=list()
-        self.rawimage = cv.CreateImage((100,100),8,3)
-        self.image = cv.CreateImage((100,100),8,3)
-        cv.Set(self.rawimage,0)
-        cv.Set(self.image,0)
+##        self.rawimage = cv.CreateImage((100,100),8,3)
+##        self.image = cv.CreateImage((100,100),8,3)
+##        cv.Set(self.rawimage,0)
+##        cv.Set(self.image,0)
 
-        self.CalibData=CalibData()
-        self.calibrated=False
+        
         self.lasttime=0
         self.acttime=0
         self.framecount=0
@@ -50,6 +60,14 @@ class LiveCamWin(wx.Frame):
         
         self.Show()
         
+    def CreateMenu(self):
+        Menubar =wx.MenuBar()
+        Config = wx.Menu()
+        Menubar.Append(Config,'&Config')
+        Config.Append(ID_CPROP,'&Properties','Camera Properties')
+        
+        return Menubar
+
     def InitAVTCamera(self):
          #print CamObj._get_Camera()
         if not isinstance(self.caminterface,AVTCam.AVTCam):
@@ -58,7 +76,8 @@ class LiveCamWin(wx.Frame):
                 self.SetStatusText('AVT Interface&Driver found')
                 self.Bind(AVTCam.EVT_CameraUnplugged, self.CamPlugUnplug)
                 self.Bind(AVTCam.EVT_CameraPlugged, self.CamPlugUnplug)
-                #self.Bind(wx.EVT_MENU, self.CameraProperties, id=ID_CPROP)
+                self.Bind(wx.EVT_MENU, self.CameraProperties, id=ID_CPROP)
+
                 self.Bind(AVTCam.EVT_FrameAcquired, self.GrabAVT)
                 
                 self.panel=wx.Panel(self, wx.ID_ANY, style=wx.BORDER_SUNKEN)
@@ -80,6 +99,8 @@ class LiveCamWin(wx.Frame):
 
         self.caminterface._set_Acquire(True)
         return True
+    def CameraProperties(self,event):
+        self.caminterface.ShowProperties(True,1)
      
     def CamPlugUnplug(self,event):
         self.InitAVTCamera()
@@ -110,6 +131,7 @@ class LiveCamWin(wx.Frame):
 
         #print "Put to pic list to queue!"
         #print threading.activeCount()
+
     def OnClose(self, event):
         self.caminterface._set_Acquire(False)
         for item in self.childs:
@@ -164,11 +186,5 @@ class QueuePicThread(threading.Thread):
                     
             self.aquirequeue.task_done()
 
-class CalibData:
-    def __init__(self):
-        self.intrinsic=cv.CreateMat(3,3,cv.CV_32FC1)
-        self.recti=cv.CreateMat(3,3,cv.CV_32FC1)
-        cv.Set(self.recti,1)
-        
-        self.distortion=cv.CreateMat(5,1,cv.CV_32FC1)    
+
 

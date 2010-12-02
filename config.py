@@ -1,5 +1,7 @@
 # -*- coding: cp1252 -*-
-import wx
+import wx,os,sys
+
+ProgDir=os.path.dirname(sys.argv[0])
 
 EVT_RESULT_ID = wx.NewId()
 

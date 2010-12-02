@@ -7,17 +7,32 @@ import math
 #import globals
 import config
 
+from time import sleep
+
+ID_CCAL=wx.NewId()
+ID_CCALL=wx.NewId()
+ID_CCALS=wx.NewId()
+
 class LiveTrackWin(wx.Frame):
     def __init__(self,source):
         self.winsource=source
         screensize=wx.Display().GetGeometry()
-        wx.Frame.__init__(self,None,wx.ID_ANY,title='LiveTrackWin',pos=(screensize[2]/2,0),size=(screensize[2]/2,screensize[3]/2),style= wx.BORDER_RAISED  |  wx.RESIZE_BORDER |  wx.CAPTION   )
+        wx.Frame.__init__(self,None,wx.ID_ANY,title='LiveTrackWin',pos=(screensize[2]/2,0),size=(screensize[2]/2,screensize[3]/2),style= wx.DEFAULT_FRAME_STYLE ^ wx.CLOSE_BOX   )
         self.status=self.CreateStatusBar()
         
         self.panel=wx.Panel(self, wx.ID_ANY, style=wx.BORDER_SUNKEN)
         self.panelsizer=wx.BoxSizer(wx.HORIZONTAL)
         self.panelsizer.Add(self.panel,2,wx.EXPAND)
         self.SetSizer(self.panelsizer)
+
+        menu=self.CreateMenu()
+        self.SetMenuBar(menu)
+
+        
+
+        self.Bind(wx.EVT_MENU, self.CameraCalibration, id=ID_CCAL)
+        self.Bind(wx.EVT_MENU, self.LoadCalibration, id=ID_CCALL)
+        self.Bind(wx.EVT_MENU, self.SaveCalibration, id=ID_CCALS)
 
         self.panel.Bind(wx.EVT_MOUSEWHEEL, self.Mousewheel)
         self.panel.Bind(wx.EVT_ENTER_WINDOW,self.MouseInWindow)
@@ -53,12 +68,26 @@ class LiveTrackWin(wx.Frame):
         self.elliplist=list()
         self.connectlist=list()
         self.rightdown=False, (None,None), (None,None)
+
+        self.CalibData=CalibData()
+        self.calibrated=False
         
         self.childs=list()
 
 
         self.Show()
+
+    def CreateMenu(self):
+        Menubar =wx.MenuBar()
+        Operate = wx.Menu()
+        Menubar.Append(Operate,'&Operate')
         
+        Operate.Append(ID_CCALL,'&Load Calibration','Load Camera Calibration')
+        Operate.Append(ID_CCALS,'&Save Calibration','Save Camera Calibration')
+        Operate.Append(ID_CCAL,'&Calibration','Camera Calibration')
+        #Operate.Append(ID_CAMPROP,'&Properties','Camera Properties')
+        return Menubar
+    
     def PicProcessed(self, event):
         if event.msg=="Pic to Queue!":
             #print 'got pics'
@@ -194,7 +223,139 @@ class LiveTrackWin(wx.Frame):
                 #get mouse pic koords
                 self.rightdown=True,self.rightdown[1],self.Panel2ImageKoord(self.panelwidth,self.panelheight,self.zoomrect,pt)
                 #print rightdown
-                
+    def CameraCalibration(self,event):
+        filters = 'Image files (*.gif;*.png;*.jpg;*.bmp)|*.gif;*.png;*.jpg;*.bmp' 
+        
+        n_boards=6 #Number of boards
+        board_w=7
+        board_h=7
+        board_n = board_w * board_h
+        board_sz =( board_w, board_h )
+
+        image_points = cv.CreateMat(n_boards*board_n,2,cv.CV_32FC1)
+        objekt_points = cv.CreateMat(n_boards*board_n,3,cv.CV_32FC1)
+        point_counts = cv.CreateMat(n_boards,1,cv.CV_32SC1)
+        intrinsic_matrix = cv.CreateMat(3,3,cv.CV_32FC1)
+        distortion_coeffs = cv.CreateMat(5,1,cv.CV_32FC1)
+        detectsuccsess=0
+        needcalibpic = True
+        #cv.NamedWindow('Calibration',0)
+        #get screen resolution
+        #screen=wx.Display().GetGeometry()
+        #cv.MoveWindow('Calibration',int(screen[2]/3*2),0)
+        #cv.ResizeWindow('Calibration',screen[2]-int(screen[2]/3*2)-12,int((screen[2]-int(screen[2]/3*2))*self.image.height/self.image.width))
+
+        while needcalibpic:
+            wx.MessageBox('Put Chessboard Pattern ( %dx%d) into %d. Position' %(board_w,board_h,detectsuccsess+1), 'Calibration Procedure',style=wx.OK|wx.ICON_EXCLAMATION)
+            raw = cv.CreateImage((self.image.width,self.image.height),8,1)
+            cv.CvtColor(self.image,raw,cv.CV_RGB2GRAY)
+            paternsize=(board_w,board_h)
+            found, corners=cv.FindChessboardCorners(raw, paternsize, cv.CV_CALIB_CB_ADAPTIVE_THRESH)
+            if found==0:
+                self.SetStatusText('Chessboard Pattern could not be detected')
+                continue
+            else:
+                #Get subpixel accuracy on those corners
+                cv.FindCornerSubPix( raw, corners, ( 11, 11 ),( -1, -1 ), ( cv.CV_TERMCRIT_EPS+cv.CV_TERMCRIT_ITER, 30, 0.1))
+                cv.DrawChessboardCorners(self.image, paternsize, corners, 1)
+                i= detectsuccsess*board_n
+                j= 0
+                stop=False
+                while not stop:
+                    image_points[i,0] = corners[j][0]
+                    image_points[i,1] = corners[j][1]
+                    objekt_points[i,0] = j/board_w
+                    objekt_points[i,1] = j%board_w
+                    objekt_points[i,2] = 0.0
+                    i+=1
+                    j+=1
+                    if j>=board_n:
+                        stop=True
+                point_counts[detectsuccsess,0]=board_n
+                detectsuccsess+=1
+                self.SetStatusText('%.0f Chessboard Pattern successfully detected' % detectsuccsess)
+                #cv.ShowImage('Calibration',self.image)
+                self.Replot()
+                sleep(1)
+                if detectsuccsess>=n_boards:
+                    needcalibpic = False
+            #self.displayImage(self.image,self.imagepanel)
+        if (detectsuccsess>0):
+            image_points_new = cv.CreateMat(detectsuccsess*board_n,2,cv.CV_32FC1)
+            objekt_points_new = cv.CreateMat(detectsuccsess*board_n,3,cv.CV_32FC1)
+            point_counts_new = cv.CreateMat(detectsuccsess,1,cv.CV_32SC1)
+            for ii in range(0,detectsuccsess):
+                i= ii*board_n
+                j= 0
+                stop=False
+                while not stop:
+                    image_points_new[i,0] = image_points[i,0]
+                    image_points_new[i,1] = image_points[i,1]
+                    objekt_points_new[i,0] = objekt_points[i,0]
+                    objekt_points_new[i,1] = objekt_points[i,1]
+                    objekt_points_new[i,2] = objekt_points[i,2]
+                    i+=1
+                    j+=1
+                    if j>=board_n:
+                        stop=True
+                point_counts_new[ii,0]=point_counts[ii,0]
+            intrinsic_matrix[0,0] = 1.0
+            intrinsic_matrix[1,1] = 1.0
+            #calibrate camera
+            self.CalibData.intrinsic=None
+            self.CalibData.distortion=None
+            rot  = cv.CreateMat(detectsuccsess,3,cv.CV_32FC1)
+            trans= cv.CreateMat(detectsuccsess,3,cv.CV_32FC1)
+            #self.CalibData.intrinsic, self.CalibData.distortion = cv.CalibrateCamera2( objekt_points_new,image_points_new, point_counts_new, cv.GetSize( self.cvdistimage ),intrinsic_matrix)
+            cv.CalibrateCamera2( objekt_points_new,image_points_new, point_counts_new, cv.GetSize( self.image ),intrinsic_matrix,distortion_coeffs,rot,trans,0)
+            self.CalibData.intrinsic=intrinsic_matrix
+            self.CalibData.distortion=distortion_coeffs
+            self.SetStatusText('Camera Calibration successfull')
+            self.calibrated=True
+            cv.DestroyWindow('Calibration')
+            #cv.cvSave( "Intrinsics2.xml", self.CalibData.intrinsic )
+            #cv.cvSave( "Distortion2.xml", self.CalibData.distortion )
+    def SaveCalibration(self,event):
+        directory=config.ProgDir
+        filename="Intrinsics.xml"
+        dlg = wx.FileDialog(self, "Save intrinsic camera matrix as", directory, filename, 'xml files (*.xml)|*.xml', wx.SAVE)
+        if (dlg.ShowModal()==wx.ID_OK):
+            filename=dlg.GetFilename()
+            directory=dlg.GetDirectory()
+        dlg.Destroy()
+        cv.Save( filename, self.CalibData.intrinsic )
+        dlg = wx.FileDialog(self, "Save distortion camera matrix as", directory, filename, 'xml files (*.xml)|*.xml', wx.SAVE)
+        if (dlg.ShowModal()==wx.ID_OK):
+            filename=dlg.GetFilename()
+            directory=dlg.GetDirectory()
+        dlg.Destroy()
+        cv.Save( filename, self.CalibData.distortion )
+    def LoadCalibration(self,event):
+        self.SetStatusText('Select file with intrinsic camera matrix')
+        filters = 'xml files (*.xml)|*.xml' 
+        success=False
+        while not success:
+            dlg = wx.FileDialog(self, "Select file with intrinsic camera matrix", config.ProgDir, "", filters, wx.FD_OPEN)
+            if dlg.ShowModal() == wx.ID_OK:
+                filename=dlg.GetFilenames()
+                dirname=dlg.GetDirectory()
+                self.CalibData.intrinsic = cv.Load( filename[0] )
+                dlg.Destroy()
+            self.SetStatusText('Select file with distortion camera matrix')
+            dlg = wx.FileDialog(self, "Select file with distortion camera matrix", config.ProgDir, "", filters, wx.FD_OPEN)
+            if dlg.ShowModal() == wx.ID_OK:
+                filename=dlg.GetFilenames()
+                dirname=dlg.GetDirectory()
+                self.CalibData.distortion = cv.Load( filename[0] )
+                dlg.Destroy()
+                intrin=cv.GetSize(self.CalibData.intrinsic)
+                distor=cv.GetSize(self.CalibData.distortion)
+            if (intrin[0]==3 and intrin[1]==3 and distor[0]==1 and distor[1]==5):
+                self.calibrated=True
+                success=True
+                self.SetStatusText('Calibration successfully loaded')
+            else:
+                wx.MessageBox('False Input. Try again',style= wx.OK | wx.ICON_ERROR)
     def Panel2ImageKoord(self,panelwidth,panelheight,zoomrect,pt):
         pos=int(float(pt[0])/float(panelwidth)*zoomrect[2]+zoomrect[0]),int(float(pt[1])/float(panelheight)*zoomrect[3]+zoomrect[1])
         return pos
@@ -900,3 +1061,9 @@ class BmpPaintThread(threading.Thread):
                 
                     
             self.bmppaintqueue.task_done()
+
+class CalibData:
+    def __init__(self):
+        self.intrinsic=cv.CreateMat(3,3,cv.CV_32FC1)
+        self.recti=cv.CreateMat(3,3,cv.CV_32FC1)
+        cv.Set(self.recti,1)

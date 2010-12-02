@@ -14,7 +14,7 @@ class LivePlotWin(wx.Frame):
     def __init__(self,source):
         self.winsource=source
         screensize=wx.Display().GetGeometry()
-        wx.Frame.__init__(self,None,wx.ID_ANY,title='LiveCamWin',pos=(0,screensize[3]/2),size=(screensize[2]/2,screensize[3]/2),style= wx.BORDER_RAISED  |  wx.RESIZE_BORDER |  wx.CAPTION   )
+        wx.Frame.__init__(self,None,wx.ID_ANY,title='LivePlotWin',pos=(0,screensize[3]/2),size=(screensize[2]/2,screensize[3]/2),style= wx.DEFAULT_FRAME_STYLE ^ wx.CLOSE_BOX )
         self.status=self.CreateStatusBar()
 
         self.buttonpanel=wx.Panel(self, wx.ID_ANY, style=wx.NO_BORDER)
