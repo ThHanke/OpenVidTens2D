@@ -3,6 +3,7 @@ import wx,cv
 import threading
 import Queue
 import math
+import pickle
 
 #import globals
 import config
@@ -316,46 +317,71 @@ class LiveTrackWin(wx.Frame):
             #cv.cvSave( "Intrinsics2.xml", self.CalibData.intrinsic )
             #cv.cvSave( "Distortion2.xml", self.CalibData.distortion )
     def SaveCalibration(self,event):
+        
         directory=config.ProgDir
-        filename="Intrinsics.xml"
-        dlg = wx.FileDialog(self, "Save intrinsic camera matrix as", directory, filename, 'xml files (*.xml)|*.xml', wx.SAVE)
+        filename="Calibration.cal"
+        dlg = wx.FileDialog(self, "Save camera calibration data as", directory, filename, 'cal files (*.cal)|*.cal', wx.SAVE)
         if (dlg.ShowModal()==wx.ID_OK):
             filename=dlg.GetFilename()
             directory=dlg.GetDirectory()
         dlg.Destroy()
-        cv.Save( filename, self.CalibData.intrinsic )
-        dlg = wx.FileDialog(self, "Save distortion camera matrix as", directory, filename, 'xml files (*.xml)|*.xml', wx.SAVE)
-        if (dlg.ShowModal()==wx.ID_OK):
-            filename=dlg.GetFilename()
-            directory=dlg.GetDirectory()
-        dlg.Destroy()
-        cv.Save( filename, self.CalibData.distortion )
+        #cv.Save( filename, self.CalibData.intrinsic)
+        intrinsic=self.CvMattoPythonArray(self.CalibData.intrinsic)
+        distortion=self.CvMattoPythonArray(self.CalibData.distortion)
+        #print self.CalibData.intrinsic[0,0]
+        filecalib=open(filename,'w')
+        pickle.dump((intrinsic,distortion),filecalib)
+        filecalib.close()
+        #dlg = wx.FileDialog(self, "Save distortion camera matrix as", directory, filename, 'xml files (*.xml)|*.xml', wx.SAVE)
+        #if (dlg.ShowModal()==wx.ID_OK):
+        #    filename=dlg.GetFilename()
+        #    directory=dlg.GetDirectory()
+        #dlg.Destroy()
+        #cv.Save( filename, self.CalibData.distortion )
+    def CvMattoPythonArray(self,cvmat):
+        array=list()
+        for i in range(0,cvmat.rows):
+            row=list()
+            for j in range(0,cvmat.cols):
+                row.append(cvmat[i,j])
+                #print cvmat[i,j]
+            array.append(row)
+        print array
+        return array
+    def PythonArraytoCvMat(self,array):
+        numrows=len(array)
+        numcols=len(array[0])
+        #check if homogen
+        if numrows>1:
+            for k in range(1,numrows-1):
+                if numcols!=len(array[k]):
+                    return None
+        cvmat=cv.CreateMat(numrows,numcols,cv.CV_32FC1)
+        for i in range(0,cvmat.rows):
+            for j in range(0,cvmat.cols):
+                cvmat[i,j]=array[i][j]
+        return cvmat
     def LoadCalibration(self,event):
         self.SetStatusText('Select file with intrinsic camera matrix')
-        filters = 'xml files (*.xml)|*.xml' 
-        success=False
-        while not success:
-            dlg = wx.FileDialog(self, "Select file with intrinsic camera matrix", config.ProgDir, "", filters, wx.FD_OPEN)
-            if dlg.ShowModal() == wx.ID_OK:
-                filename=dlg.GetFilenames()
-                dirname=dlg.GetDirectory()
-                self.CalibData.intrinsic = cv.Load( filename[0] )
-                dlg.Destroy()
-            self.SetStatusText('Select file with distortion camera matrix')
-            dlg = wx.FileDialog(self, "Select file with distortion camera matrix", config.ProgDir, "", filters, wx.FD_OPEN)
-            if dlg.ShowModal() == wx.ID_OK:
-                filename=dlg.GetFilenames()
-                dirname=dlg.GetDirectory()
-                self.CalibData.distortion = cv.Load( filename[0] )
-                dlg.Destroy()
-                intrin=cv.GetSize(self.CalibData.intrinsic)
-                distor=cv.GetSize(self.CalibData.distortion)
-            if (intrin[0]==3 and intrin[1]==3 and distor[0]==1 and distor[1]==5):
-                self.calibrated=True
-                success=True
-                self.SetStatusText('Calibration successfully loaded')
-            else:
-                wx.MessageBox('False Input. Try again',style= wx.OK | wx.ICON_ERROR)
+        dlg = wx.FileDialog(self, "Select file with intrinsic camera matrix", config.ProgDir, "", 'cal files (*.cal)|*.cal', wx.FD_OPEN)
+        if dlg.ShowModal() == wx.ID_OK:
+            filename=dlg.GetFilenames()
+            dirname=dlg.GetDirectory()
+            filecalib=open(filename[0],'r')
+            intrinsic,distortion=pickle.load(filecalib)
+            filecalib.close()
+            #self.CalibData.intrinsic = cv.Load( filename[0] )
+            dlg.Destroy()
+            self.CalibData.intrinsic=self.PythonArraytoCvMat(intrinsic)
+            self.CalibData.distortion=self.PythonArraytoCvMat(distortion)
+            
+            intrin=cv.GetSize(self.CalibData.intrinsic)
+            distor=cv.GetSize(self.CalibData.distortion)
+        if (intrin[0]==3 and intrin[1]==3 and distor[0]==1 and distor[1]==5):
+            self.calibrated=True
+            self.SetStatusText('Calibration successfully loaded')
+        else:
+            wx.MessageBox('False Input!',style= wx.OK | wx.ICON_ERROR)
     def Panel2ImageKoord(self,panelwidth,panelheight,zoomrect,pt):
         pos=int(float(pt[0])/float(panelwidth)*zoomrect[2]+zoomrect[0]),int(float(pt[1])/float(panelheight)*zoomrect[3]+zoomrect[1])
         return pos

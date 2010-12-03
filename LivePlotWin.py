@@ -186,10 +186,10 @@ class LivePlotWin(wx.Frame):
                     Ellipse=self.tree.AppendItem(Element,'Ellipse')
                     this=self.tree.AppendItem(Ellipse,str(par.Num))
                     c1=self.tree.AppendItem(this,'MidPos x')
-                    if self.winsource.winsource.calibrated:
+                    if self.winsource.calibrated:
                         self.tree.SetItemImage(c1,0)
                     c2=self.tree.AppendItem(this,'MidPos y')
-                    if self.winsource.winsource.calibrated:
+                    if self.winsource.calibrated:
                         self.tree.SetItemImage(c2,0)
                     c3=self.tree.AppendItem(this,'Size a')
                     c4=self.tree.AppendItem(this,'Size b')
@@ -201,13 +201,13 @@ class LivePlotWin(wx.Frame):
                     Connection=self.tree.AppendItem(Element,'Connection')
                     this=self.tree.AppendItem(Connection,str(par.Num))
                     c1=self.tree.AppendItem(this,'Range x')
-                    if self.winsource.winsource.calibrated:
+                    if self.winsource.calibrated:
                         self.tree.SetItemImage(c1,0)
                     c2=self.tree.AppendItem(this,'Range y')
-                    if self.winsource.winsource.calibrated:
+                    if self.winsource.calibrated:
                         self.tree.SetItemImage(c2,0)
                     c3=self.tree.AppendItem(this,'Lenght')
-                    if self.winsource.winsource.calibrated:
+                    if self.winsource.calibrated:
                         self.tree.SetItemImage(c3,0)
                     #print len(self.itemlist),len(elliplist),len(connectlist)
         self.RecallTreeSelection()
