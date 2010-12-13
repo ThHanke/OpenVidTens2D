@@ -13,6 +13,7 @@ from time import sleep
 ID_CCAL=wx.NewId()
 ID_CCALL=wx.NewId()
 ID_CCALS=wx.NewId()
+ID_PICKALL=wx.NewId()
 
 class LiveTrackWin(wx.Frame):
     def __init__(self,source):
@@ -34,6 +35,7 @@ class LiveTrackWin(wx.Frame):
         self.Bind(wx.EVT_MENU, self.CameraCalibration, id=ID_CCAL)
         self.Bind(wx.EVT_MENU, self.LoadCalibration, id=ID_CCALL)
         self.Bind(wx.EVT_MENU, self.SaveCalibration, id=ID_CCALS)
+        self.Bind(wx.EVT_MENU, self.PickAll, id=ID_PICKALL)
 
         self.panel.Bind(wx.EVT_MOUSEWHEEL, self.Mousewheel)
         self.panel.Bind(wx.EVT_ENTER_WINDOW,self.MouseInWindow)
@@ -69,6 +71,7 @@ class LiveTrackWin(wx.Frame):
         self.elliplist=list()
         self.connectlist=list()
         self.rightdown=False, (None,None), (None,None)
+        self.PickAll=False
 
         self.CalibData=CalibData()
         self.calibrated=False
@@ -83,9 +86,10 @@ class LiveTrackWin(wx.Frame):
         Operate = wx.Menu()
         Menubar.Append(Operate,'&Operate')
         
-        Operate.Append(ID_CCALL,'&Load Calibration','Load Camera Calibration')
-        Operate.Append(ID_CCALS,'&Save Calibration','Save Camera Calibration')
+        Operate.Append(ID_CCALL,'&Load Calibration','Load camera calibration')
+        Operate.Append(ID_CCALS,'&Save Calibration','Save camera calibration')
         Operate.Append(ID_CCAL,'&Calibration','Camera Calibration')
+        Operate.Append(ID_PICKALL,'&Pick All','Try to pick all ellipses')
         #Operate.Append(ID_CAMPROP,'&Properties','Camera Properties')
         return Menubar
     
@@ -93,9 +97,10 @@ class LiveTrackWin(wx.Frame):
         if event.msg=="Pic to Queue!":
             #print 'got pics'
             datatoqueue=list()
-            datatoqueue.append((event.data[0],event.data[1], self.elliplist, self.connectlist,self.newellip,self.childs))
+            datatoqueue.append((event.data[0],event.data[1], self.elliplist, self.connectlist,self.newellip,self.childs,self.PickAll))
             self.piclistqueue.put(datatoqueue,True)
             self.newellip=None
+            self.PickAll=False
         if event.msg=="Pic processed!":
             
             fromqueue=self.resultqueue.get()
@@ -338,6 +343,7 @@ class LiveTrackWin(wx.Frame):
         #    directory=dlg.GetDirectory()
         #dlg.Destroy()
         #cv.Save( filename, self.CalibData.distortion )
+    
     def CvMattoPythonArray(self,cvmat):
         array=list()
         for i in range(0,cvmat.rows):
@@ -382,6 +388,9 @@ class LiveTrackWin(wx.Frame):
             self.SetStatusText('Calibration successfully loaded')
         else:
             wx.MessageBox('False Input!',style= wx.OK | wx.ICON_ERROR)
+            
+    def PickAll(self,event):
+        self.PickAll=True
     def Panel2ImageKoord(self,panelwidth,panelheight,zoomrect,pt):
         pos=int(float(pt[0])/float(panelwidth)*zoomrect[2]+zoomrect[0]),int(float(pt[1])/float(panelheight)*zoomrect[3]+zoomrect[1])
         return pos
@@ -489,14 +498,19 @@ class ProcessPicThread(threading.Thread):
         self.parent=parent
         self.queue=piclistqueue
         self.out_queue=resultqueue
+
+
+         
         self.num=num
         self.elliplist=list()
         self.connectlist=list()
         self.setDaemon(True)
         self.start()
+
+       
         # start the thread
         
- 
+
     def run(self):
         #print "Picthread started "+str(self.num)
         while True:
@@ -508,12 +522,19 @@ class ProcessPicThread(threading.Thread):
                 #print item
                 self.timestamp=item[0]
                 self.raw=item[1]
-                self.elliplist=item[2]
-                self.connectlist=item[3]
+                #self.elliplist=item[2]
+                #self.connectlist=item[3]
                 self.newellip=item[4]
                 self.CamChildren=item[5]
+                self.pickall=item[6]
                 self.newelliplist=list()
                 self.newconnectlist=list()
+                
+
+                #self.test=cv.CreateImage((self.raw.width,self.raw.height),cv.IPL_DEPTH_8U,3)
+                #cv.CvtColor(self.raw,self.test,cv.CV_GRAY2RGB)
+                #cv.ShowImage('pyr',self.test)
+                
 
                 if len(self.parent.elliplist)!=len(self.elliplist):
                     numlist=list()
@@ -530,23 +551,25 @@ class ProcessPicThread(threading.Thread):
 
                 self.image=cv.CreateImage((self.raw.width,self.raw.height),cv.IPL_DEPTH_8U,3)
                 cv.CvtColor(self.raw,self.image,cv.CV_GRAY2RGB)
+
+                #gray = cv.CreateImage(cv.GetSize(self.raw), 8, 1)
                 
 
-##
-##                for i in range(10,500,20): 
-##                    stor = cv.CreateMat(1, 2, cv.CV_32FC3)
-##                    print i
-##                    #circles=cv.HoughCircles(temp,stor,cv.CV_HOUGH_GRADIENT,2,self.raw.height/4,200, 100)
-##                    try:
-##                        circles=cv.HoughCircles(temp,stor,cv.CV_HOUGH_GRADIENT,1,i,130,100)
-##                        print "found"
-##                    except:
-##                        pass
+                if self.pickall:
+                    #print 'pick all circles through hough transform'
+                    self.PickAll(self.raw)
+                
+
+
+
+
+
+                
                 if self.newellip!=None:
                     #check if in already found ellip
                     isin,num=self.PosInFoundEllip(self.newellip,self.elliplist)
                     if not isin:
-                        #find ellip
+                        #print 'pick ellip'
                         ellip=self.PickEllip(self.raw,self.newellip[0],self.newellip[1],self.elliplist)    
                         if not ellip==None:
                             self.elliplist.append(ellip)
@@ -574,7 +597,7 @@ class ProcessPicThread(threading.Thread):
                     wx.PostEvent(window, config.ResultEvent("Pic processed!",None))
                     self.out_queue.join()
                 
-                    
+            self.elliplist,self.newconnectlist=self.newelliplist, self.newconnectlist        
             self.queue.task_done()
 
 
@@ -631,16 +654,19 @@ class ProcessPicThread(threading.Thread):
         found=0
         searchrectsize=20
         errcount=0
+        #print 'create memstorage'
         stor = cv.CreateMemStorage(0)
+        
         while found <1:
             searchrectsize=int(searchrectsize+searchrectsize/10)
             if searchrectsize>image.width/4:
                 break
             searchrectr=(posx-searchrectsize,posy-searchrectsize,searchrectsize*2,searchrectsize*2)
+            #print 'get search contour image'
             rectimage,searchrect=self.GetSearchCounturImage(image,searchrectr)
+            #print 'search image created'
             if rectimage==None:
                 break
-            #cv.ShowImage('rect',rectimage)
             pixout,pixin=self.InOutVal(rectimage)
             if pixout==pixin:
                 continue
@@ -672,7 +698,7 @@ class ProcessPicThread(threading.Thread):
                 #korrekt pos and size to global
                 ellipPar.MidPos=ellipPar.MidPos[0]/rectimage.width*searchrect[2]+searchrect[0],ellipPar.MidPos[1]/rectimage.height*searchrect[3]+searchrect[1]
                 ellipPar.Size= ellipPar.Size[0]/rectimage.width*searchrect[2]/2,ellipPar.Size[1]/rectimage.height*searchrect[3]/2
-                ellipPar.Angle=-ellipPar.Angle
+                #ellipPar.Angle=-ellipPar.Angle
                 ellipPar.mov=0,0
                 
                 if ellipPar.Size[1]!=0 and ellipPar.Size[0]!=0 and ellipPar.Size[1]<searchrect[3]/2 and ellipPar.Size[0]<searchrect[2]/2 and (pixin>pixout+254 or pixin<pixout-254):
@@ -694,7 +720,26 @@ class ProcessPicThread(threading.Thread):
             return None
 
 
+    def PickAll(self,gray):
+        storage = cv.CreateMat(50, 1, cv.CV_32FC3)
+        cv.HoughCircles(gray, storage, cv.CV_HOUGH_GRADIENT, 2, int(gray.width/20), 192, 200)
+        #print storage
+        for i in range(0,storage.rows):
+                row=list()
+                for j in range(0,storage.cols):
 
+                    #cv.Circle(self.image,(int(storage[i,j][0]),int(storage[i,j][1])),int(storage[i,j][2]),cv.CV_RGB(255,0,0),1)
+
+##                    if self.newellip!=None:
+##                    #check if in already found ellip
+##                    isin,num=self.PosInFoundEllip(self.newellip,self.elliplist)
+##                    if not isin:
+                        #print 'pick ellip'
+                    ellip=self.PickEllip(self.raw,int(storage[i,j][0]),int(storage[i,j][1]),self.elliplist)    
+                    if not ellip==None:
+                        self.elliplist.append(ellip)
+        
+        
     def TrackEllip(self,image,ellipses):
         
         elliplistnew=list()
@@ -746,7 +791,7 @@ class ProcessPicThread(threading.Thread):
 
                 EllipParnew.MidPos=EllipParnew.MidPos[0]+searchrect[0],EllipParnew.MidPos[1]+searchrect[1]
                 EllipParnew.Size= EllipParnew.Size[0]/2,EllipParnew.Size[1]/2
-                EllipParnew.Angle=-EllipParnew.Angle
+                #EllipParnew.Angle=-EllipParnew.Angle
                 EllipParnew.mov=EllipParnew.MidPos[0]-ellip.MidPos[0],EllipParnew.MidPos[1]-ellip.MidPos[1]
 
                 if EllipParnew.Size[1]!=0 and EllipParnew.Size[0]!=0  and 0.8<=ellip.Size[0]/EllipParnew.Size[0]<=1.2 and 0.8<=ellip.Size[1]/EllipParnew.Size[1]<=1.2 and 0.5<=ellip.Angle/EllipParnew.Angle<=1.5 and (pixin>pixout+254 or pixin<pixout-254):
@@ -1039,14 +1084,15 @@ class BmpPaintThread(threading.Thread):
         threading.Thread.__init__(self)
         self.bmppaintqueue=bmppaintqueue
         #self.piclistqueue=piclistqueue
+
+              
         self.num=num
         self.ZoomImage=cv.CreateImage((100,100),8,3)
         self.ScaledImg=cv.CreateImage((100,100),8,3)
         self.setDaemon(True)
         self.start()
         # start the thread
-        
- 
+
     def run(self):
         #print "Aquirethread started "+str(self.num)
         while True:

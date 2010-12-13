@@ -2,6 +2,7 @@
 import wx,cv
 import threading
 import Queue
+import os
 
 import wx.lib.plot as plot
 
@@ -23,8 +24,13 @@ class LivePlotWin(wx.Frame):
         self.stopbutton=wx.BitmapButton(self.buttonpanel,wx.ID_ANY,wx.Image('Stopupsmall.png', wx.BITMAP_TYPE_PNG).ConvertToBitmap(),style=wx.BU_EXACTFIT)
         self.startbutton.SetBitmapSelected(wx.Image('Startdownsmall.png', wx.BITMAP_TYPE_PNG).ConvertToBitmap())
         self.stopbutton.SetBitmapSelected(wx.Image('Stopdownsmall.png', wx.BITMAP_TYPE_PNG).ConvertToBitmap())
+
+        self.filetext=wx.TextCtrl(self.buttonpanel,wx.ID_ANY,size=(300,20))
+        self.filetext.SetValue('data000.txt')
+        
         self.buttonsizer.Add(self.startbutton,0)
         self.buttonsizer.Add(self.stopbutton,0)
+        self.buttonsizer.Add(self.filetext,1,wx.ALIGN_CENTER_VERTICAL)
         self.buttonpanel.SetSizer(self.buttonsizer)
 
         self.splitter = wx.SplitterWindow(self, wx.ID_ANY, style=wx.SP_BORDER)
@@ -100,13 +106,34 @@ class LivePlotWin(wx.Frame):
         
     def OnStart(self,event):
         self.tofile=True
-        self.filename='test.txt'
-        self.fp=open('test.txt','w',1)
+        self.filename=self.filetext.GetValue()
+        if os.path.isfile(self.filename):
+            self.SetStatusText('File exists allready')
+            comps=self.filename.rpartition('.')
+            #print len(comps[0])
+            string=''
+            for i in range(len(comps[0])-1,0,-1):
+                if comps[0][i].isdigit():
+                    string=comps[0][i]+string
+                else:
+                    count=int( string)+1
+                    newcountstring='%d'%count
+                    if len(newcountstring)<=len(string):
+                        newcountstring=str.zfill(newcountstring,len(string))
+                    else:
+                        newcountstring=str.zfill(newcountstring,len(string)+1)
+                    break
+            self.filename=comps[0][0:(i+1)]+newcountstring+comps[1]+comps[2]
+            self.filetext.SetValue(self.filename)
+            
+        self.fp=open(self.filename,'w',1)
+                
         self.WriteDataHead(self.fp)
-        self.parent.SetStatusText('Capturing')
+        self.SetStatusText('Capturing')
         self.capturestarttime=clock()
         self.data=list()
     def WriteDataHead(self,fileinter):
+        string=''
         for i in range(len(self.toplotlist)):
             if i==0:
                 string='Time'+'\t'
@@ -117,13 +144,13 @@ class LivePlotWin(wx.Frame):
     def OnStop(self,event):
         
         self.tofile=False
-        self.filename=None
+        
         try:
             del self.videowriter
         except:
             pass
         self.fp=None
-        self.parent.SetStatusText('Stopped Capturing')
+        self.SetStatusText('Stopped Capturing')
     def GetEllipWithNum(self,liste,num):
         found=False
         for listpos, item in enumerate(liste):
@@ -299,6 +326,7 @@ class DataProtoThread(threading.Thread):
         self.parent=parent
         self.dataqueue=dataqueue
         #self.piclistqueue=piclistqueue
+       
         self.num=num
         self.data=list()
         self.plotlist=list()
@@ -308,9 +336,9 @@ class DataProtoThread(threading.Thread):
         self.fp=None
         self.setDaemon(True)
         self.start()
-        # start the thread
         
- 
+        # start the thread
+  
     def run(self):
         #print "Aquirethread started "+str(self.num)
         while True:

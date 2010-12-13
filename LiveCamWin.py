@@ -56,7 +56,16 @@ class LiveCamWin(wx.Frame):
         for i in range(1):
             t=QueuePicThread(self.aquirequeue, i)
 
-        self.InitAVTCamera()
+        if self.InitAVTCamera():
+            self.SetStatusText('AVT Interface initiated ')
+        else:
+            self.SetStatusText('No AVT Camera found')
+            self.caminterface.Close()
+            self.caminterface=None
+            if self.InitOpenCVCamera():
+                self.SetStatusText('OpenCV Interface initiated ')
+                
+            
         
         self.Show()
         
@@ -69,26 +78,32 @@ class LiveCamWin(wx.Frame):
         return Menubar
 
     def InitAVTCamera(self):
-         #print CamObj._get_Camera()
-        if not isinstance(self.caminterface,AVTCam.AVTCam):
-            try:
-                self.caminterface=AVTCam.AVTCam(self,wx.ID_ANY,wx.DefaultPosition,wx.DefaultSize,0,'AVT')
-                self.SetStatusText('AVT Interface&Driver found')
-                self.Bind(AVTCam.EVT_CameraUnplugged, self.CamPlugUnplug)
-                self.Bind(AVTCam.EVT_CameraPlugged, self.CamPlugUnplug)
-                self.Bind(wx.EVT_MENU, self.CameraProperties, id=ID_CPROP)
-
-                self.Bind(AVTCam.EVT_FrameAcquired, self.GrabAVT)
-                
-                self.panel=wx.Panel(self, wx.ID_ANY, style=wx.BORDER_SUNKEN)
-                self.panelsizer=wx.BoxSizer(wx.HORIZONTAL)
-                self.panelsizer.Add(self.caminterface,2,wx.EXPAND)
-                self.SetSizer(self.panelsizer)
-        
-            except:
-                return False
+        #print CamObj._get_Camera()
+        #if not isinstance(self.caminterface,AVTCam.AVTCam):
+        try:
+            self.caminterface=AVTCam.AVTCam(self,wx.ID_ANY,wx.DefaultPosition,wx.DefaultSize,0,'AVT')
+            self.SetStatusText('AVT Interface&Driver found')
+            
+        except:
+            return False
 
         self.caminterface._set_Camera(0)
+        if self.caminterface._get_Camera()<0:
+                self.caminterface.Close()
+                self.SetStatusText('Camera Initilization failed or unplugged')
+                return False
+
+        self.Bind(AVTCam.EVT_CameraUnplugged, self.CamPlugUnplug)
+        self.Bind(AVTCam.EVT_CameraPlugged, self.CamPlugUnplug)
+        self.Bind(wx.EVT_MENU, self.CameraProperties, id=ID_CPROP)
+
+        self.Bind(AVTCam.EVT_FrameAcquired, self.GrabAVT)
+        
+        self.panel=wx.Panel(self, wx.ID_ANY, style=wx.BORDER_SUNKEN)
+        self.panelsizer=wx.BoxSizer(wx.HORIZONTAL)
+        self.panelsizer.Add(self.caminterface,2,wx.EXPAND)
+        self.SetSizer(self.panelsizer)
+        
         self.aquire=self.caminterface._get_Acquire()
         self.caminterface._set_Acquire(False)
         self.caminterface._set_Mode(4)
@@ -96,7 +111,6 @@ class LiveCamWin(wx.Frame):
         self.caminterface._set_Magnification(0)
         self.caminterface._set_ShutterControl(1)
         self.caminterface._set_Palette(0)
-
         self.caminterface._set_Acquire(True)
         return True
     def CameraProperties(self,event):
@@ -131,9 +145,46 @@ class LiveCamWin(wx.Frame):
 
         #print "Put to pic list to queue!"
         #print threading.activeCount()
+    def InitOpenCVCamera(self):
+        self.caminterface=cv.CreateCameraCapture(0)
+        
+        self.image=cv.QueryFrame( self.caminterface)
+        if self.image==None:
+            self.SetStatusText('OpenCVCamera Initilization failed')
+            return
+
+        self.ID_FTIMER=wx.NewId()
+        self.Timer=wx.Timer(self, self.ID_FTIMER)
+        self.Timer.Start(30)
+        self.Bind(wx.EVT_TIMER,self.GrabOpenCV,id=self.ID_FTIMER)
+
+        self.panel=wx.Panel(self, wx.ID_ANY, style=wx.BORDER_SUNKEN)
+        self.panelsizer=wx.BoxSizer(wx.HORIZONTAL)
+        self.panelsizer.Add(self.panel,2,wx.EXPAND)
+        self.SetSizer(self.panelsizer)
+
+    def GrabOpenCV(self,event):
+        try:
+            self.image=cv.QueryFrame( self.CamInterface )
+            self.acttime=clock()
+            if self.acttime-self.lasttime<1:
+                self.framecount+=1
+            else:
+                self.SetStatusText('FPS: '+str(self.framecount),1)
+                self.framecount=1
+                self.lasttime=self.acttime
+            if len(self.childs)>=1:
+                self.datatoqueue.append((self.acttime, self.image,self.image.width,self.image.height,self.childs))
+            if len(self.datatoqueue)>=3:
+                self.aquirequeue.put(self.datatoqueue,True)
+                self.datatoqueue=list()
+        except:
+            return
+
+
 
     def OnClose(self, event):
-        self.caminterface._set_Acquire(False)
+        #self.caminterface._set_Acquire(False)
         for item in self.childs:
             item.OnClose(True)
         self.Destroy()
@@ -151,7 +202,8 @@ class QueuePicThread(threading.Thread):
         self.start()
         # start the thread
         
- 
+
+
     def run(self):
         #print "Aquirethread started "+str(self.num)
         while True:
@@ -166,17 +218,20 @@ class QueuePicThread(threading.Thread):
                 height=item[3]
                 trackers=item[4]
 
-                #print rawdatapointer, width, height
-                try:
-                    self.memstring=ctypes.string_at(rawdatapointer,width*height)
-                except:
-                    break
+                if isinstance(rawdatapointer,cv.cvmat):
+                    self.raw=cv.CreateImage((self.raw.width,self.raw.height),cv.IPL_DEPTH_8U,1)
+                    cv.CvtColor(self.image,self.raw,cv.CV_RGB2GRAY)
+                else:
+                    
+                    #print rawdatapointer, width, height
+                    try:
+                        self.memstring=ctypes.string_at(rawdatapointer,width*height)
+                    except:
+                        break
 
-                self.raw= cv.CreateImageHeader((width,height),cv.IPL_DEPTH_8U, 1)
-                #self.raw=cv.CreateImage((width,height),cv.IPL_DEPTH_8U,1)
-                cv.SetData(self.raw, self.memstring,width)
-                #cv.Copy(raw,self.raw)
-                #self.raw=cv.CloneImage(raw)
+                    self.raw= cv.CreateImageHeader((width,height),cv.IPL_DEPTH_8U, 1)
+                    #self.raw=cv.CreateImage((width,height),cv.IPL_DEPTH_8U,1)
+                    cv.SetData(self.raw, self.memstring,width)
 
                 #print len(trackers)
                 
