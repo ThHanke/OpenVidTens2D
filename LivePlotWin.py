@@ -126,7 +126,8 @@ class LivePlotWin(wx.Frame):
             self.filename=comps[0][0:(i+1)]+newcountstring+comps[1]+comps[2]
             self.filetext.SetValue(self.filename)
             
-        self.fp=open(self.filename,'w',1)
+        self.fp=open(self.filename,'w',0)
+
                 
         self.WriteDataHead(self.fp)
         self.SetStatusText('Capturing')
@@ -141,9 +142,12 @@ class LivePlotWin(wx.Frame):
                 string=string+'\t'
             string= string+str(self.toplotlist[i])
         fileinter.writelines(string+'\n')
+        
     def OnStop(self,event):
         
         self.tofile=False
+        if self.fp!=None:
+            self.fp.close()
         
         try:
             del self.videowriter
@@ -214,6 +218,7 @@ class LivePlotWin(wx.Frame):
                     this=self.tree.AppendItem(Ellipse,str(par.Num))
                     c1=self.tree.AppendItem(this,'MidPos x')
                     if self.winsource.calibrated:
+                        
                         self.tree.SetItemImage(c1,0)
                     c2=self.tree.AppendItem(this,'MidPos y')
                     if self.winsource.calibrated:
@@ -267,8 +272,9 @@ class LivePlotWin(wx.Frame):
                 self.itemlist.extend(self.connectlist)
                 self.BuildTreeCtrl()
             if len(self.itemlist)>0:
-                self.toqueue.append((timestamp, self.elliplist, self.connectlist,self.toplotlist,self.tofile,self.filename))
-                if len(self.toqueue)>=5:
+                
+                self.toqueue.append((timestamp, self.elliplist, self.connectlist,self.toplotlist,self.tofile,self.winsource.calibrated,self.winsource.CalibData.intrinsic,self.winsource.CalibData.distortion))
+                if len(self.toqueue)>=1: #if greater then 1 in fileinterface last pic will not be processed
                     self.dataqueue.put(self.toqueue)
                     self.toqueue=list()
             if len(self.itemlist)!=len(self.elliplist)+len(self.connectlist):
@@ -291,27 +297,15 @@ class LivePlotWin(wx.Frame):
                 panelwidth,panelheight=self.panel.GetSize()
                 self.plotter.SetSize(size=(panelwidth,panelheight))
                 
-                if len(event.data)>0:
-                    gc = plot.PlotGraphics(event.data, '', 'Time [s]', '[pixel]')
+                if len(event.data[0])>0:
+                    gc = plot.PlotGraphics(event.data[0], '', 'Time [s]', '[pixel]')
                     self.plotter.Draw(gc)
                     self.plotter.SetXSpec('min')
                     self.plotter.SetYSpec('min')   
                     self.plotter.Redraw()
                 self.called=0
-    def KoordinatestoUndist(self,winsource,x,y):
-        src=cv.CreateMat(1,1,cv.CV_64FC2)
-        dst=cv.CreateMat(1,1,cv.CV_64FC2)
-        cv.Set1D(src,0,cv.Scalar(x,y,0,0));
-        new=cv.Get1D(src,0)
-        newx=new[0]
-        newy=new[1]
-        #must be camera matrix at last position to give accurate results
-        
-        cv.UndistortPoints(src,dst,winsource.CalibData.intrinsic,winsource.CalibData.distortion,P=winsource.CalibData.intrinsic)
-        new=cv.Get1D(dst,0)
-        newx=new[0]
-        newy=new[1]
-        return newx,newy
+                if self.tofile:
+                    self.fp.writelines(event.data[1])
     def OnClose(self,event):
         for item in self.childs:
             item.OnClose(True)
@@ -345,6 +339,8 @@ class DataProtoThread(threading.Thread):
         
             pointerlist=self.dataqueue.get()
             #print "DataProtothread got task"+ " "+str(self.num)+" "+str(len(pointerlist))
+            resultstring=''
+            string=''
             
             for item in pointerlist:
 
@@ -353,22 +349,26 @@ class DataProtoThread(threading.Thread):
                 self.connectlist=item[2]
                 self.toplotlist=item[3]
                 self.tofile=item[4]
-                self.filename=item[5]
-
+                self.calibrated=item[5]
+                self.intrinsic=item[6]
+                self.distortion=item[7]
+                #self.filename=item[5]
+                
+               
                 
                 
-                #plot selection and to write file
+                #plot selection and write to file
                 plotlist=list()
-                if self.tofile and self.fp==None:
-                    self.fp=open(self.filename,'w',1)
-                    #write header
-                    for i in range(len(self.toplotlist)):
-                        if i==0:
-                            string='Time'+'\t'
-                        else:
-                            string=string+'\t'
-                        string= string+str(self.toplotlist[i])
-                    self.fp.writelines(string+'\n')
+##                if self.tofile and self.fp==None:
+##                    self.fp=open(self.filename,'w',1)
+##                    #write header
+##                    for i in range(len(self.toplotlist)):
+##                        if i==0:
+##                            string='Time'+'\t'
+##                        else:
+##                            string=string+'\t'
+##                        string= string+str(self.toplotlist[i])
+##                    self.fp.writelines(string+'\n')
                
                 for listpos, item in enumerate(self.toplotlist):
                     self.toplot=self.toplotlist[listpos]
@@ -395,9 +395,16 @@ class DataProtoThread(threading.Thread):
                         else:
                             epar1=self.GetEllipWithNum(self.elliplist,linepar.Pt1)
                             epar2=self.GetEllipWithNum(self.elliplist,linepar.Pt2)
-                            
 
-                        rx,ry=abs(epar1.MidPos[0]-epar2.MidPos[0]),abs(epar1.MidPos[1]-epar2.MidPos[1])
+                        #correct position concerning cam calibration
+
+                        if self.calibrated:
+                            x1,y1=self.KoordinatestoUndist(self.intrinsic,self.distortion,epar1.MidPos[0],epar1.MidPos[1])
+                            x2,y2=self.KoordinatestoUndist(self.intrinsic,self.distortion,epar2.MidPos[0],epar2.MidPos[1])
+                            rx,ry=abs(x1-x2),abs(y1-y2)
+                            
+                        else:
+                            rx,ry=abs(epar1.MidPos[0]-epar2.MidPos[0]),abs(epar1.MidPos[1]-epar2.MidPos[1])
                         
                         #if self.winsource.winsource.calibrated:
                         #    rx,ry=self.KoordinatestoUndist(self.winsource.winsource,rx,ry)
@@ -416,6 +423,10 @@ class DataProtoThread(threading.Thread):
                             continue
                         else:
                             epar=self.GetEllipWithNum(self.elliplist,self.toplot[1])
+                            #correct position concerning cam calibration
+                            if self.calibrated:
+                                epar.MidPos[0],epar.MidPos[1]=self.KoordinatestoUndist(self.intrinsic,self.distortion,epar.MidPos[0],epar.MidPos[1])
+                            
                             if self.toplot[2]=='MidPos x':
                                 this=epar.MidPos[0]
                             if self.toplot[2]=='MidPos y':
@@ -442,8 +453,8 @@ class DataProtoThread(threading.Thread):
                         self.data[listpos]=temp
                     else:
                         self.data.append(temp)
-                if self.tofile:
-                    self.fp.writelines(string+'\n')
+##                if self.tofile:
+##                    self.fp.writelines(string+'\n')
         ##        if self.tofile:
         ##            self.fp.writelines(string+'\n')
         ##            
@@ -460,9 +471,11 @@ class DataProtoThread(threading.Thread):
                     marker = plot.PolyMarker(self.data[i], colour=self.colours[i] ,marker='circle',width=1, size=1,legend=self.toplotlist[i][2])
                     plotlist.append(marker)
                     self.plotlist=plotlist
+                    
+                resultstring=resultstring+string+'\n'
 
                 
-            wx.PostEvent(self.parent, config.ResultEvent("Data ready!",self.plotlist))
+            wx.PostEvent(self.parent, config.ResultEvent("Data ready!",(self.plotlist,resultstring)))
                     
                     
             self.dataqueue.task_done()
@@ -490,4 +503,18 @@ class DataProtoThread(threading.Thread):
             return linepar
         else:
             return None
+    def KoordinatestoUndist(self,intrinsic,distortion,x,y):
+        src=cv.CreateMat(1,1,cv.CV_64FC2)
+        dst=cv.CreateMat(1,1,cv.CV_64FC2)
+        cv.Set1D(src,0,cv.Scalar(x,y,0,0));
+        new=cv.Get1D(src,0)
+        newx=new[0]
+        newy=new[1]
+        #must be camera matrix at last position to give accurate results
+        
+        cv.UndistortPoints(src,dst,intrinsic,distortion,P=intrinsic)
+        new=cv.Get1D(dst,0)
+        newx=new[0]
+        newy=new[1]
+        return newx,newy
     
