@@ -9,6 +9,7 @@ includes = []
 excludes = ['_gtkagg', '_tkagg', 'bsddb', 'curses', 'email', 'pywin.debugger',
             'pywin.debugger.dbgcon', 'pywin.dialogs', 'tcl',
             'Tkconstants', 'Tkinter']
+#excludes = []
 
 packages = []
 #dll_excludes = ['libgdk-win32-2.0-0.dll', 'libgobject-2.0-0.dll', 'tcl84.dll','tk84.dll']
@@ -29,7 +30,7 @@ setup(data_files = [('', ['calicon.png',
                             "packages": packages,
                             "dll_excludes": dll_excludes,
                             "bundle_files": 3,
-                            "dist_dir": "dist",
+                            "dist_dir": "dist2",
                             "xref": False,
                             
                             "skip_archive": False,

@@ -17,6 +17,7 @@ import LivePlotWin
 
 
 
+
 class InitFrame(wx.Frame):
     def __init__(self,parent):
         screensize=wx.Display().GetGeometry()
@@ -74,6 +75,6 @@ class App(wx.App):
 
 if __name__=="__main__":
     
-    #app = App(redirect=False)
-    app = App(redirect=1)
+    app = App(redirect=False)
+    #app = App(redirect=1)
     app.MainLoop()

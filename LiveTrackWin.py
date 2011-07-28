@@ -48,12 +48,13 @@ class LiveTrackWin(wx.Frame):
         config.EVT_RESULT(self, self.PicProcessed)
 
         #spwan queue
-        self.piclistqueue=Queue.PriorityQueue(-1)
-        self.resultqueue=Queue.PriorityQueue(-1)
-        self.bmppaintqueue=Queue.PriorityQueue(-1)
+        self.piclistqueue=Queue.Queue(-1)
+        self.resultqueueTrack=Queue.Queue(-1)
+        self.resultqueuePlot=Queue.Queue(-1)
+        self.bmppaintqueue=Queue.Queue(-1)
         #spawn pool of threads
         for i in range(1):
-            t=ProcessPicThread(self,self.piclistqueue,self.resultqueue,i)
+            t=ProcessPicThread(self,self.piclistqueue,self.resultqueueTrack,self.resultqueuePlot,i)
 
         #spawn pool of threads
         for i in range(1):
@@ -97,6 +98,7 @@ class LiveTrackWin(wx.Frame):
         if event.msg=="Pic to Queue!":
             #print 'got pics'
             datatoqueue=list()
+            #print event.data[0]
             datatoqueue.append((event.data[0],event.data[1], self.elliplist, self.connectlist,self.newellip,self.childs,self.PickAll))
             self.actualgrayimage=event.data[1]
             self.piclistqueue.put(datatoqueue,False)
@@ -104,13 +106,13 @@ class LiveTrackWin(wx.Frame):
             self.PickAll=False
         if event.msg=="Pic processed!":
             
-            fromqueue=self.resultqueue.get()
+            fromqueue=self.resultqueueTrack.get()
             self.timestamp, self.image,  self.elliplist, self.connectlist,   =fromqueue[0],fromqueue[1],fromqueue[2], fromqueue[3]
             
             
-            self.resultqueue.task_done()
+            self.resultqueueTrack.task_done()
             #print self.timestamp, len(self.elliplist)
-            #print self.resultqueue.qsize()
+            #print self.resultqueueTrack.qsize()
             self.Replot()
 
     def Replot(self):
@@ -506,13 +508,14 @@ class LiveTrackWin(wx.Frame):
 class ProcessPicThread(threading.Thread):
     """Background Worker Thread Class."""
 
-    def __init__(self, parent, piclistqueue,resultqueue, num):
+    def __init__(self, parent, piclistqueue,resultqueuetrack,resultqueuedata, num):
         """Init Worker Thread Class."""
         threading.Thread.__init__(self)
         self.font=cv.InitFont(cv.CV_FONT_HERSHEY_DUPLEX,1,1,0,1,8)
         self.parent=parent
         self.queue=piclistqueue
-        self.out_queue=resultqueue
+        self.out_queue1=resultqueuetrack
+        self.out_queue2=resultqueuedata
 
 
          
@@ -535,7 +538,8 @@ class ProcessPicThread(threading.Thread):
 
             for item in pointerlist:
 
-                #print item[0]
+                #print 'in processthread'
+                #print item[5]
                 self.timestamp=item[0]
                 self.raw=item[1]
                 self.elliplist=item[2]
@@ -597,17 +601,15 @@ class ProcessPicThread(threading.Thread):
                 
                 trackers=list()
                 trackers.append(self.parent) #put it to source
+                self.out_queue1.put((self.timestamp,self.image, self.newelliplist, self.newconnectlist),False)
+                
                 for window in self.CamChildren:
                     trackers.append(window)
                 #    #if isinstance(window, LiveTrackWin)or isinstance(window, LivePlotWin):
-                #    if isinstance(window, LiveTrackWin):
-                #        trackers.append(window)
-                #print len(trackers)
-                
+                    self.out_queue2.put((self.timestamp,self.image, self.newelliplist, self.newconnectlist),False)
+                        
+               
                 for window in trackers:
-                    #wx.PostEvent(self.tracker, ResultEvent("Pic processed!",self.image, self.elliplist))
-                    #self.out_queue.put((self.timestamp,self.image, self.newelliplist, self.newconnectlist, self.rectimage))
-                    self.out_queue.put((self.timestamp,self.image, self.newelliplist, self.newconnectlist),False)
                     wx.PostEvent(window, config.ResultEvent("Pic processed!",None))
                     #self.out_queue.join()
                 
@@ -757,7 +759,7 @@ class ProcessPicThread(threading.Thread):
             if cont==None:
                 morecont=False
             while morecont:
-                if( len(cont) < 5 or len(cont) >10000):
+                if( len(cont) < 6 or len(cont) >10000):
                     #print 'low points'
                     cont=cont.h_next()
                     if cont==None:
@@ -771,8 +773,8 @@ class ProcessPicThread(threading.Thread):
                 EllipParnew.Num=ellip.Num
                 #korrekt pos and size to global
 
-                EllipParnew.MidPos=EllipParnew.MidPos[0]+searchrect[0],EllipParnew.MidPos[1]+searchrect[1]
-                EllipParnew.Size= EllipParnew.Size[0]/2,EllipParnew.Size[1]/2
+                EllipParnew.MidPos=EllipParnew.MidPos[0]/rectimage.width*searchrect[2]+searchrect[0],EllipParnew.MidPos[1]/rectimage.height*searchrect[3]+searchrect[1]
+                EllipParnew.Size= EllipParnew.Size[0]/rectimage.width*searchrect[2]/2,EllipParnew.Size[1]/rectimage.height*searchrect[3]/2
                 #EllipParnew.Angle=-EllipParnew.Angle
                 EllipParnew.mov=EllipParnew.MidPos[0]-ellip.MidPos[0],EllipParnew.MidPos[1]-ellip.MidPos[1]
 
@@ -816,7 +818,7 @@ class ProcessPicThread(threading.Thread):
                         if cont==None:
                             morecont=False
                         while morecont:
-                            if( len(cont) < 5 or len(cont) >10000):
+                            if( len(cont) < 6 or len(cont) >10000):
                                 #print 'low points'
                                 cont=cont.h_next()
                                 if cont==None:
@@ -839,8 +841,9 @@ class ProcessPicThread(threading.Thread):
                             #define Number
                             EllipParnew.Num=ellip.Num
                             #korrekt pos and size to global
-                            EllipParnew.MidPos=EllipParnew.MidPos[0]+searchrect[0],EllipParnew.MidPos[1]+searchrect[1]
-                            EllipParnew.Size= EllipParnew.Size[0]/2,EllipParnew.Size[1]/2
+                            EllipParnew.MidPos=EllipParnew.MidPos[0]/rectimage.width*searchrect[2]+searchrect[0],EllipParnew.MidPos[1]/rectimage.height*searchrect[3]+searchrect[1]
+                            EllipParnew.Size= EllipParnew.Size[0]/rectimage.width*searchrect[2]/2,EllipParnew.Size[1]/rectimage.height*searchrect[3]/2
+
                             
                             #EllipParnew.Angle=-EllipParnew.Angle
                             EllipParnew.mov=EllipParnew.MidPos[0]-ellip.MidPos[0],EllipParnew.MidPos[1]-ellip.MidPos[1]
@@ -963,7 +966,9 @@ class ProcessPicThread(threading.Thread):
             pyrimage=cv.CreateImage((rect[2]*2,rect[3]*2),8,1)
             temp=cv.CreateImage((rect[2],rect[3]),8,1)
             temp2=cv.CreateImage((rect[2],rect[3]),8,1)
-            thresimg=cv.CreateImage((rect[2],rect[3]),8,1)
+            
+            thresimg=cv.CreateImage((temp.width*5,temp.height*5),8,1)
+            
             cv.SetImageROI(image,rect)
             #print 'copy subimage'
             cv.Copy(image,temp)
@@ -971,47 +976,38 @@ class ProcessPicThread(threading.Thread):
 
             cv.PyrUp(temp,pyrimage)
             cv.PyrDown(pyrimage,temp)
-            cv.Copy(temp,temp2)
 
-            cv.Smooth(temp2,temp,cv.CV_MEDIAN,3)
+            cv.Smooth(temp,temp,cv.CV_MEDIAN,3)
+            #cv.Smooth(temp,temp2,cv.CV_BILATERAL,3,3,175,175)
+
+            cv.Resize(temp,thresimg,cv.CV_INTER_CUBIC)
             
-            #print 'calc thres subimage'
-            #print 'calc threshold'
-            pixout,pixin=self.InOutVal(temp)
+            
+            pixout,pixin=self.InOutVal(thresimg)
             thres=int((pixin+pixout)/2)
-            
-            #print 'do thres subimage'
-            cv.Threshold(temp,thresimg,thres,255,cv.CV_THRESH_BINARY)
+            #thres=int(abs(pixin-pixout)*0.9+pixin)
+
+            cv.Threshold(thresimg,thresimg,thres,255,cv.CV_THRESH_BINARY)
             #print 'return subimage'
             return thresimg, rect
     def InOutVal(self,img):
-##        pixout2=0
-##        pixin2=0
-##        
-##
-##        pixout2=(img[0,0]+img[0,1]+img[1,0]
-##                 +img[0,img.width-1]+img[1,img.width-1]+img[0,img.width-2]
-##                 +img[img.height-1,0]+img[img.height-2,0]+img[img.height-1,1]
-##                 +img[img.height-1,img.width-1]+img[img.height-2,img.width-1]+img[img.height-1,img.width-2])
-##
-##        pixin2=(img[int(img.height/2),int(img.width/2)]+img[int(img.height/2)-2,int(img.width/2)]+img[int(img.height/2)-1,int(img.width/2)]+img[int(img.height/2)+1,int(img.width/2)]+img[int(img.height/2)+2,int(img.width/2)]
-##                +img[int(img.height/2),int(img.width/2)-1]+img[int(img.height/2)+1,int(img.width/2)-1]+img[int(img.height/2)-1,int(img.width/2)-1]
-##                +img[int(img.height/2),int(img.width/2)+1]+img[int(img.height/2)+1,int(img.width/2)+1]+img[int(img.height/2)-1,int(img.width/2)+1]
-##                +img[int(img.height/2),int(img.width/2)+2]
-##                +img[int(img.height/2),int(img.width/2)-2])
-##
-##        pixout2=pixout2/12
-##        pixin2=pixin2/13
 
         pixout=0
         pixin=0
         
-        for i in range(img.width):
-            pixout += img[0,i]+img[img.height-1,i]
-        for i in range(img.height):
-            pixout += img[i,0]+img[i,img.width-1]
+##        for i in range(img.width):
+##            pixout += img[0,i]+img[img.height-1,i]
+##        for i in range(img.height):
+##            pixout += img[i,0]+img[i,img.width-1]
+##        pixout=pixout/(img.width*2+img.height*2)
+        pixout=(img[0,0]+img[0,1]+img[1,0]
+                 +img[0,img.width-1]+img[1,img.width-1]+img[0,img.width-2]
+                 +img[img.height-1,0]+img[img.height-2,0]+img[img.height-1,1]
+                 +img[img.height-1,img.width-1]+img[img.height-2,img.width-1]+img[img.height-1,img.width-2])
+        pixout=pixout/12
+
+        
         pixin=img[int(img.height/2),int(img.width/2)]+img[int(img.height/2)+1,int(img.width/2)]+img[int(img.height/2),int(img.width/2)+1]+img[int(img.height/2)+1,int(img.width/2)+1]
-        pixout=pixout/(img.width*2+img.height*2)
         pixin=pixin/4
         return pixout,pixin
 

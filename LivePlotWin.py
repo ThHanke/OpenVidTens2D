@@ -24,13 +24,17 @@ class LivePlotWin(wx.Frame):
         self.stopbutton=wx.BitmapButton(self.buttonpanel,wx.ID_ANY,wx.Image('Stopupsmall.png', wx.BITMAP_TYPE_PNG).ConvertToBitmap(),style=wx.BU_EXACTFIT)
         self.startbutton.SetBitmapSelected(wx.Image('Startdownsmall.png', wx.BITMAP_TYPE_PNG).ConvertToBitmap())
         self.stopbutton.SetBitmapSelected(wx.Image('Stopdownsmall.png', wx.BITMAP_TYPE_PNG).ConvertToBitmap())
-
-        self.filetext=wx.TextCtrl(self.buttonpanel,wx.ID_ANY,size=(300,20))
+        self.clearbutton=wx.Button(self.buttonpanel,wx.ID_ANY,'CLEAR',size=(60,28),style=wx.BU_EXACTFIT)
+        
+        
+        self.filetext=wx.TextCtrl(self.buttonpanel,wx.ID_ANY,size=(300,20),style=wx.BU_EXACTFIT)
         self.filetext.SetValue('data000.txt')
         
         self.buttonsizer.Add(self.startbutton,0)
         self.buttonsizer.Add(self.stopbutton,0)
+        self.buttonsizer.Add(self.clearbutton,0,wx.ALIGN_CENTER_VERTICAL)
         self.buttonsizer.Add(self.filetext,1,wx.ALIGN_CENTER_VERTICAL)
+        
         self.buttonpanel.SetSizer(self.buttonsizer)
 
         self.splitter = wx.SplitterWindow(self, wx.ID_ANY, style=wx.SP_BORDER)
@@ -55,6 +59,7 @@ class LivePlotWin(wx.Frame):
         self.elliplist=list()
         self.connectlist=list()
         self.tofile=False
+        self.shouldclear=False
         self.filename=None
         self.fp=None
         self.count=0
@@ -83,6 +88,7 @@ class LivePlotWin(wx.Frame):
         
         self.startbutton.Bind(wx.EVT_BUTTON, self.OnStart)
         self.stopbutton.Bind(wx.EVT_BUTTON, self.OnStop)
+        self.clearbutton.Bind(wx.EVT_BUTTON, self.OnClear)
 
         self.tree.Bind(wx.EVT_MOUSE_EVENTS,self.OnSelChanged)
         self.tree.Bind(wx.EVT_TREE_SEL_CHANGED,self.OnSelChanged)
@@ -155,6 +161,10 @@ class LivePlotWin(wx.Frame):
             pass
         self.fp=None
         self.SetStatusText('Stopped Capturing')
+    def OnClear(self,event):
+        self.shouldclear=True
+        self.SetStatusText('Cleared live plot')
+        
     def GetEllipWithNum(self,liste,num):
         found=False
         for listpos, item in enumerate(liste):
@@ -262,8 +272,8 @@ class LivePlotWin(wx.Frame):
                 child=self.tree.GetNextChild(child[0],child[1])
     def PicProcessed(self,event):
         if event.msg=="Pic processed!":
-            fromqueue=self.winsource.resultqueue.get()
-            self.winsource.resultqueue.task_done()
+            fromqueue=self.winsource.resultqueuePlot.get()
+            self.winsource.resultqueuePlot.task_done()
             timestamp, self.elliplist, self.connectlist  =fromqueue[0],fromqueue[2], fromqueue[3]
             if len(self.itemlist)!=len(self.elliplist)+len(self.connectlist):
                 #print "rebuild tree 1" 
@@ -273,8 +283,8 @@ class LivePlotWin(wx.Frame):
                 self.BuildTreeCtrl()
             if len(self.itemlist)>0:
                 
-                self.toqueue.append((timestamp, self.elliplist, self.connectlist,self.toplotlist,self.tofile,self.winsource.calibrated,self.winsource.CalibData.intrinsic,self.winsource.CalibData.distortion))
-                if len(self.toqueue)>=1: #if greater then 1 in fileinterface last pic will not be processed
+                self.toqueue.append((timestamp, self.elliplist, self.connectlist,self.toplotlist,self.tofile,self.winsource.calibrated,self.winsource.CalibData.intrinsic,self.winsource.CalibData.distortion,self.shouldclear))
+                if len(self.toqueue)>=1: 
                     self.dataqueue.put(self.toqueue)
                     self.toqueue=list()
             if len(self.itemlist)!=len(self.elliplist)+len(self.connectlist):
@@ -283,6 +293,9 @@ class LivePlotWin(wx.Frame):
                 self.itemlist.extend(self.elliplist)
                 self.itemlist.extend(self.connectlist)
                 self.BuildTreeCtrl()
+            if self.shouldclear:
+                print 'ok'
+                self.shouldclear=False
             #print self.timestamp, len(self.elliplist)
             #print self.resultqueue.qsize()
             #self.Replot()
@@ -352,8 +365,11 @@ class DataProtoThread(threading.Thread):
                 self.calibrated=item[5]
                 self.intrinsic=item[6]
                 self.distortion=item[7]
-                #self.filename=item[5]
-                
+                self.shouldclear=item[8]
+
+                if self.shouldclear:
+                    self.data=list()
+                    
                
                 
                 

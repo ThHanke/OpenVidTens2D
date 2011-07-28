@@ -61,8 +61,8 @@ class LiveCamWin(wx.Frame):
             self.SetStatusText('AVT Interface initiated ')
         else:
             self.SetStatusText('No AVT Camera found')
-            self.caminterface.Close()
-            self.caminterface.Destroy()
+            
+            
             if self.InitOpenCVCamera():
                 self.SetStatusText('OpenCV Interface initiated ')
             else:
@@ -78,22 +78,25 @@ class LiveCamWin(wx.Frame):
     def InitAVTCamera(self):
         #print CamObj._get_Camera()
         if not isinstance(self.caminterface,AVTCam.AVTCam):
-
             try:
                 self.caminterface=AVTCam.AVTCam(self,wx.ID_ANY,wx.DefaultPosition,wx.DefaultSize,0,'AVT')
                 self.SetStatusText('AVT Interface&Driver found')
                 
                 
-            except:
-                self.caminterface.Close()
-                self.caminterface.Destroy()
-                print 'closing'
+            except wx.PyAssertionError:
+                #have to destroy useless activex window
+                print self.GetChildren()
+                for item in self.GetChildren():
+                    if isinstance(item,wx.activex.ActiveXWindow):
+                        item.Destroy()
                 return False
 
         self.caminterface._set_Camera(0)
         if self.caminterface._get_Camera()<0:
-                
+                print 'closing'
                 self.SetStatusText('Camera Initilization failed or unplugged')
+                self.caminterface.Close()
+                self.caminterface.Destroy()
                 return False
 
         ID_CPROP=wx.NewId()
@@ -273,15 +276,19 @@ class LiveCamWin(wx.Frame):
         dlg = wx.FileDialog(self, "Select files", self.dirname, "", filters, wx.FD_MULTIPLE)
         if dlg.ShowModal() == wx.ID_OK:
             try:
+                
                 self.filenames=dlg.GetFilenames()
+
                 self.dirname=dlg.GetDirectory()
             except:
                 dlg.Destroy()
                 return False
-            piccount=len(self.filenames)-1
+   
+            
+            piccount=len(self.filenames)
             self.imageslider.SetMin(1)
-            self.imageslider.SetMax(piccount+1)
-            self.imageslider.SetValue(piccount+1)
+            self.imageslider.SetMax(piccount)
+            self.imageslider.SetValue(piccount)
             self.imageslider.Enable(True)
             dlg.Destroy()
             self.imageslider.SetValue(1)
