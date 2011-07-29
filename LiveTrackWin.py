@@ -91,14 +91,13 @@ class LiveTrackWin(wx.Frame):
         Operate.Append(ID_CCALS,'&Save Calibration','Save camera calibration')
         Operate.Append(ID_CCAL,'&Calibration','Camera Calibration')
         Operate.Append(ID_PICKALL,'&Pick All','Try to pick all ellipses')
-        #Operate.Append(ID_CAMPROP,'&Properties','Camera Properties')
+        
         return Menubar
     
     def PicProcessed(self, event):
         if event.msg=="Pic to Queue!":
             #print 'got pics'
             datatoqueue=list()
-            #print event.data[0]
             datatoqueue.append((event.data[0],event.data[1], self.elliplist, self.connectlist,self.newellip,self.childs,self.PickAll))
             self.actualgrayimage=event.data[1]
             self.piclistqueue.put(datatoqueue,False)
@@ -112,7 +111,6 @@ class LiveTrackWin(wx.Frame):
             
             self.resultqueueTrack.task_done()
             #print self.timestamp, len(self.elliplist)
-            #print self.resultqueueTrack.qsize()
             self.Replot()
 
     def Replot(self):
@@ -208,13 +206,6 @@ class LiveTrackWin(wx.Frame):
             if self.winsource.isfileinterface:
                 wx.PostEvent(self, config.ResultEvent("Pic to Queue!",(self.timestamp,self.actualgrayimage)))
                 
-            #self.gray=cv.CreateImage((self.image.width,self.image.height),cv.IPL_DEPTH_8U, 1)
-            #cv.CvtColor(self.image,self.gray,cv.CV_RGB2GRAY)
-            #wx.PostEvent(self, config.ResultEvent("Pic to Queue!",(self.timestamp,self.gray)))
-
-
-
-                    
     def MouseRightClick(self,event):
  
 
@@ -233,10 +224,7 @@ class LiveTrackWin(wx.Frame):
             self.rightdown=False,self.rightdown[1],pos
             #print self.rightdown
             if self.winsource.isfileinterface:
-                wx.PostEvent(self, config.ResultEvent("Pic to Queue!",(self.timestamp,self.actualgrayimage)))
-            #self.Replot()
-            
-##            
+                wx.PostEvent(self, config.ResultEvent("Pic to Queue!",(self.timestamp,self.actualgrayimage)))    
 
     def MouseMove(self,event):
         if self.mousein:
@@ -652,10 +640,9 @@ class ProcessPicThread(threading.Thread):
             #print 'search image created'
             if rectimage==None:
                 break
-            pixout,pixin=self.InOutVal(rectimage)
-            if pixout==pixin:
+            if cv.CountNonZero(rectimage)<=10:
                 continue
-            #print pixout,pixin
+
             cont=cv.FindContours (rectimage, stor, mode=cv.CV_RETR_TREE,method=cv.CV_CHAIN_APPROX_TC89_KCOS)
             morecont=True
             cont=cont.v_next()
@@ -682,7 +669,7 @@ class ProcessPicThread(threading.Thread):
                 ellipPar.Size= ellipPar.Size[0]/rectimage.width*searchrect[2]/2,ellipPar.Size[1]/rectimage.height*searchrect[3]/2
                 ellipPar.mov=0,0
                 
-                if ellipPar.Size[1]!=0 and ellipPar.Size[0]!=0 and ellipPar.Size[1]<searchrect[3]/2 and ellipPar.Size[0]<searchrect[2]/2 and (pixin>pixout+254 or pixin<pixout-254):
+                if ellipPar.Size[1]!=0 and ellipPar.Size[0]!=0 and ellipPar.Size[1]<searchrect[3]/2 and ellipPar.Size[0]<searchrect[2]/2:
                     found=1
                     
                 
@@ -747,7 +734,7 @@ class ProcessPicThread(threading.Thread):
             if rectimage==None:
                 continue
 
-            pixout,pixin=self.InOutVal(rectimage)
+            #pixout,pixin=self.InOutVal(rectimage)
 
             stor = cv.CreateMemStorage(0)
             cont=cv.FindContours (rectimage, stor, mode=cv.CV_RETR_TREE,method=cv.CV_CHAIN_APPROX_TC89_KCOS)
@@ -780,7 +767,7 @@ class ProcessPicThread(threading.Thread):
 
                 
 
-                if EllipParnew.Size[1]!=0 and EllipParnew.Size[0]!=0  and 0.8<=ellip.Size[0]/EllipParnew.Size[0]<=1.2 and 0.8<=ellip.Size[1]/EllipParnew.Size[1]<=1.2 and 0.5<=ellip.Angle/EllipParnew.Angle<=1.5 and (pixin>pixout+254 or pixin<pixout-254):
+                if EllipParnew.Size[1]!=0 and EllipParnew.Size[0]!=0  and 0.8<=ellip.Size[0]/EllipParnew.Size[0]<=1.2 and 0.8<=ellip.Size[1]/EllipParnew.Size[1]<=1.2 and 0.5<=ellip.Angle/EllipParnew.Angle<=1.5 :
                     found=1
                     #print 'found %(listpos)d in frame %(framenum)d ' % vars()
 
@@ -804,8 +791,10 @@ class ProcessPicThread(threading.Thread):
                         rectimage, searchrect=self.GetSearchCounturImage(image,rect)
                         if rectimage==None:
                             continue
-                        pixout,pixin=self.InOutVal(rectimage)
-                        if not (pixin>pixout+254 or pixin<pixout-254):
+##                        pixout,pixin=self.InOutVal(rectimage)
+##                        if not (pixin>pixout+254 or pixin<pixout-254):
+##                            continue
+                        if cv.CountNonZero(rectimage)<=10:
                             continue
                         
                         cv.Rectangle(self.image,(searchrect[0],searchrect[1]),(int(searchrect[0]+searchrect[2]),int(searchrect[1]+searchrect[3])),cv.CV_RGB(0,255,0),1,8,0)
@@ -827,17 +816,7 @@ class ProcessPicThread(threading.Thread):
                             #print 'enought points'
                             #print 'fit ellip %(listpos)d in frame %(framenum)d ' % vars()
                             EllipParnew=self.FitEllipOnContour(cont)
-##                            b,h=self.GetAABBEllip(EllipParnew)
-##               
-##                            if EllipParnew.MidPos[0]-b/2 < 0 or EllipParnew.MidPos[0]-b/2 > searchrect[2] or EllipParnew.MidPos[1]-h/2 < 0 or EllipParnew.MidPos[1]-h/2 > searchrect[3]:
-##                                #print 'found ellip bigger then searchrect'
-##                                #print b,h
-##                                if len(cont)==0:
-##                                    break
-##                                cont=cont.h_next()
-##                                if cont==None:
-##                                    morecont=False
-##                                continue
+
                             #define Number
                             EllipParnew.Num=ellip.Num
                             #korrekt pos and size to global
@@ -912,9 +891,7 @@ class ProcessPicThread(threading.Thread):
         #make searchrect bigger and move around
         rectlist=list()
         factors=range(1,5)
-        #factors=range(1,7)
-        #bfactors=range(1,5)
-        #bfactors=range(1,7)
+
         bfactors=range(1,5)
 
         for factor in factors:
@@ -982,37 +959,14 @@ class ProcessPicThread(threading.Thread):
 
             cv.Resize(temp,thresimg,cv.CV_INTER_CUBIC)
             
-            
-            pixout,pixin=self.InOutVal(thresimg)
-            thres=int((pixin+pixout)/2)
-            #thres=int(abs(pixin-pixout)*0.9+pixin)
 
-            cv.Threshold(thresimg,thresimg,thres,255,cv.CV_THRESH_BINARY)
+
+            #cv.Threshold(thresimg,thresimg,thres,255,cv.CV_THRESH_BINARY)
+            cv.Threshold(thresimg,thresimg,0,255,cv.CV_THRESH_OTSU)
+            
             #print 'return subimage'
             return thresimg, rect
-    def InOutVal(self,img):
 
-        pixout=0
-        pixin=0
-        
-##        for i in range(img.width):
-##            pixout += img[0,i]+img[img.height-1,i]
-##        for i in range(img.height):
-##            pixout += img[i,0]+img[i,img.width-1]
-##        pixout=pixout/(img.width*2+img.height*2)
-        pixout=(img[0,0]+img[0,1]+img[1,0]
-                 +img[0,img.width-1]+img[1,img.width-1]+img[0,img.width-2]
-                 +img[img.height-1,0]+img[img.height-2,0]+img[img.height-1,1]
-                 +img[img.height-1,img.width-1]+img[img.height-2,img.width-1]+img[img.height-1,img.width-2])
-        pixout=pixout/12
-
-        
-        pixin=img[int(img.height/2),int(img.width/2)]+img[int(img.height/2)+1,int(img.width/2)]+img[int(img.height/2),int(img.width/2)+1]+img[int(img.height/2)+1,int(img.width/2)+1]
-        pixin=pixin/4
-        return pixout,pixin
-
-       
-        #return pixout2,pixin2
     def NumEllip(self, elliplist):
         posiblenum=range(len(elliplist)+10)
         for listpos, item in enumerate(elliplist):
