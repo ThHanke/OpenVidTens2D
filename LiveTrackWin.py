@@ -91,14 +91,13 @@ class LiveTrackWin(wx.Frame):
         Operate.Append(ID_CCALS,'&Save Calibration','Save camera calibration')
         Operate.Append(ID_CCAL,'&Calibration','Camera Calibration')
         Operate.Append(ID_PICKALL,'&Pick All','Try to pick all ellipses')
-        #Operate.Append(ID_CAMPROP,'&Properties','Camera Properties')
+        
         return Menubar
     
     def PicProcessed(self, event):
         if event.msg=="Pic to Queue!":
             #print 'got pics'
             datatoqueue=list()
-            #print event.data[0]
             datatoqueue.append((event.data[0],event.data[1], self.elliplist, self.connectlist,self.newellip,self.childs,self.PickAll))
             self.actualgrayimage=event.data[1]
             self.piclistqueue.put(datatoqueue,False)
@@ -208,13 +207,6 @@ class LiveTrackWin(wx.Frame):
             if self.winsource.isfileinterface:
                 wx.PostEvent(self, config.ResultEvent("Pic to Queue!",(self.timestamp,self.actualgrayimage)))
                 
-            #self.gray=cv.CreateImage((self.image.width,self.image.height),cv.IPL_DEPTH_8U, 1)
-            #cv.CvtColor(self.image,self.gray,cv.CV_RGB2GRAY)
-            #wx.PostEvent(self, config.ResultEvent("Pic to Queue!",(self.timestamp,self.gray)))
-
-
-
-                    
     def MouseRightClick(self,event):
  
 
@@ -233,10 +225,7 @@ class LiveTrackWin(wx.Frame):
             self.rightdown=False,self.rightdown[1],pos
             #print self.rightdown
             if self.winsource.isfileinterface:
-                wx.PostEvent(self, config.ResultEvent("Pic to Queue!",(self.timestamp,self.actualgrayimage)))
-            #self.Replot()
-            
-##            
+                wx.PostEvent(self, config.ResultEvent("Pic to Queue!",(self.timestamp,self.actualgrayimage)))    
 
     def MouseMove(self,event):
         if self.mousein:
@@ -638,7 +627,7 @@ class ProcessPicThread(threading.Thread):
 
     def PickEllip(self,image,posx,posy,elliplist):
         found=0
-        searchrectsize=10
+        searchrectsize=20
         errcount=0
         #print 'create memstorage'
         stor = cv.CreateMemStorage(0)
@@ -652,10 +641,9 @@ class ProcessPicThread(threading.Thread):
             #print 'search image created'
             if rectimage==None:
                 break
-            #pixout,pixin=self.InOutVal(rectimage)
-            #if pixout==pixin:
-            #    continue
-            #print pixout,pixin
+            if cv.CountNonZero(rectimage)<=10:
+                continue
+
             cont=cv.FindContours (rectimage, stor, mode=cv.CV_RETR_TREE,method=cv.CV_CHAIN_APPROX_TC89_KCOS)
             morecont=True
             cont=cont.v_next()
@@ -680,10 +668,9 @@ class ProcessPicThread(threading.Thread):
                 #korrekt pos and size to global
                 ellipPar.MidPos=ellipPar.MidPos[0]/rectimage.width*searchrect[2]+searchrect[0],ellipPar.MidPos[1]/rectimage.height*searchrect[3]+searchrect[1]
                 ellipPar.Size= ellipPar.Size[0]/rectimage.width*searchrect[2]/2,ellipPar.Size[1]/rectimage.height*searchrect[3]/2
-                #ellipPar.Angle=-ellipPar.Angle
                 ellipPar.mov=0,0
                 
-                if ellipPar.Size[1]!=0 and ellipPar.Size[0]!=0 and ellipPar.Size[1]<searchrect[3]/2 and ellipPar.Size[0]<searchrect[2]/2 :
+                if ellipPar.Size[1]!=0 and ellipPar.Size[0]!=0 and ellipPar.Size[1]<searchrect[3]/2 and ellipPar.Size[0]<searchrect[2]/2:
                     #print 'picked'
                     #print searchrectr
                     ellipPar.searchrect=searchrect
@@ -729,7 +716,6 @@ class ProcessPicThread(threading.Thread):
             ellip=ellipses[listpos]
             
             b,h=self.GetAABBEllip(ellip)
-            #print b,h
             #b,h=b+20,h+20
 ##            b,h=int(b+b/2),int(h+h/2)
 ##            if b<20 or h<20:
@@ -741,18 +727,18 @@ class ProcessPicThread(threading.Thread):
 ##                    h=20
 ##                    b=int(h*aspect)
             b,h=int(b*1.3),int(h*1.3)
-##            if b<20:
-##                b=20
-##            if h<20:
-##                h=20
-            if b<20 or h<20:
-                aspect=float(b)/float(h)
-                if aspect<1:
-                    b=20
-                    h=int(b/aspect)
-                else:
-                    h=20
-                    b=int(h*aspect)
+            if b<20:
+                b=20
+            if h<20:
+                h=20
+##            if b<20 or h<20:
+##                aspect=float(b)/float(h)
+##                if aspect<1:
+##                    b=20
+##                    h=int(b/aspect)
+##                else:
+##                    h=20
+##                    b=int(h*aspect)
             
             #b,h=int(b+20),int(h+20)
             
@@ -760,10 +746,6 @@ class ProcessPicThread(threading.Thread):
             
             #with movement correction
             searchrecttr = (int(ellip.MidPos[0]+int(ellip.mov[0])-b/2),int(ellip.MidPos[1]+int(ellip.mov[1])-h/2),int(b),int(h))
-            #print searchrecttr,ellip.searchrect
-
-##           #without movement correction
-##            searchrecttr = (int(ellip.MidPos[0]-b/2),int(ellip.MidPos[1]-h/2),int(b),int(h))
            
             #print 'finish init %(listpos)d in frame %(framenum)d ' % vars()
             rectimage, searchrect=self.GetSearchCounturImage(image,searchrecttr)
@@ -783,10 +765,6 @@ class ProcessPicThread(threading.Thread):
             if cont==None:
                 morecont=False
             while morecont:
-                #print cv.ContourArea(cont)
-                #print rectimage.width*rectimage.height
-                
-                
                 if( len(cont) < 6 or len(cont) >10000):
                     #print 'low points'
                     cont=cont.h_next()
@@ -794,14 +772,14 @@ class ProcessPicThread(threading.Thread):
                         morecont=False
                     continue
                 #print 'enought points'
-
+                
                 #test size of area
 
                 #print cv.ContourArea(cont)
                 #print rectimage.width*rectimage.height
 
                 if cv.ContourArea(cont)<=(rectimage.width*rectimage.height/50)or cv.ContourArea(cont)>(rectimage.width*rectimage.height/2):
-                    #print 'area too small'
+                    print 'area too small'
                     cont=cont.h_next()
                     if cont==None:
                         morecont=False
@@ -817,7 +795,7 @@ class ProcessPicThread(threading.Thread):
                 EllipParnew.MidPos=EllipParnew.MidPos[0]/rectimage.width*searchrect[2]+searchrect[0],EllipParnew.MidPos[1]/rectimage.height*searchrect[3]+searchrect[1]
                 EllipParnew.Size= EllipParnew.Size[0]/rectimage.width*searchrect[2]/2,EllipParnew.Size[1]/rectimage.height*searchrect[3]/2
                 #EllipParnew.Angle=-EllipParnew.Angle
-                EllipParnew.mov=(EllipParnew.MidPos[0]-ellip.MidPos[0]),(EllipParnew.MidPos[1]-ellip.MidPos[1])
+                EllipParnew.mov=EllipParnew.MidPos[0]-ellip.MidPos[0],EllipParnew.MidPos[1]-ellip.MidPos[1]
 
 
                 #if EllipParnew.Size[1]!=0 and EllipParnew.Size[0]!=0  and 0.8<=ellip.Size[0]/EllipParnew.Size[0]<=1.2 and 0.8<=ellip.Size[1]/EllipParnew.Size[1]<=1.2 and (pixin>pixout+254 or pixin<pixout-254):
@@ -825,12 +803,10 @@ class ProcessPicThread(threading.Thread):
                     # check speed
                     speed1=math.sqrt(ellip.mov[0]**2+ellip.mov[1]**2)
                     speed2=math.sqrt(EllipParnew.mov[0]**2+EllipParnew.mov[1]**2)
-                    if speed2<10*speed1:
+                    if speed2<10*speed1 or (speed1==0 or speed2==0):
                         found=1
                         EllipParnew.searchrect=searchrect
                         break
-                    else:
-                        pass
                 
                 cont=cont.h_next()
                 if cont==None:
@@ -850,9 +826,11 @@ class ProcessPicThread(threading.Thread):
                         rectimage, searchrect=self.GetSearchCounturImage(image,rect)
                         if rectimage==None:
                             continue
-                        #pixout,pixin=self.InOutVal(rectimage)
-                        #if not (pixin>pixout+254 or pixin<pixout-254):
-                        #    continue
+##                        pixout,pixin=self.InOutVal(rectimage)
+##                        if not (pixin>pixout+254 or pixin<pixout-254):
+##                            continue
+                        if cv.CountNonZero(rectimage)<=10:
+                            continue
                         
                         cv.Rectangle(self.image,(searchrect[0],searchrect[1]),(int(searchrect[0]+searchrect[2]),int(searchrect[1]+searchrect[3])),cv.CV_RGB(0,255,0),1,8,0)
                         stor = cv.CreateMemStorage(0)
@@ -885,17 +863,7 @@ class ProcessPicThread(threading.Thread):
                                 continue
                             #print 'fit ellip %(listpos)d in frame %(framenum)d ' % vars()
                             EllipParnew=self.FitEllipOnContour(cont)
-##                            b,h=self.GetAABBEllip(EllipParnew)
-##               
-##                            if EllipParnew.MidPos[0]-b/2 < 0 or EllipParnew.MidPos[0]-b/2 > searchrect[2] or EllipParnew.MidPos[1]-h/2 < 0 or EllipParnew.MidPos[1]-h/2 > searchrect[3]:
-##                                #print 'found ellip bigger then searchrect'
-##                                #print b,h
-##                                if len(cont)==0:
-##                                    break
-##                                cont=cont.h_next()
-##                                if cont==None:
-##                                    morecont=False
-##                                continue
+
                             #define Number
                             EllipParnew.Num=ellip.Num
                             #korrekt pos and size to global
@@ -972,21 +940,19 @@ class ProcessPicThread(threading.Thread):
         #make searchrect bigger and move around
         rectlist=list()
         factors=range(1,5)
-        #factors=range(1,7)
-        #bfactors=range(1,5)
-        #bfactors=range(1,7)
-        bfactors=range(1,7)
+
+        bfactors=range(1,5)
 
         for factor in factors:
-            teilen=16
-            #teilen=8
+            #teilen=12
+            teilen=8
             for bfactor in bfactors:
 
 ##                if searchrect[2]<=searchrect[3]:
 ##                    size=searchrect[2]
 ##                else:
 ##                    size=searchrect[3]
-##                radius=(size)/10.0*bfactor
+                #radius=(size)/10.0*bfactor
                 radius=(searchrect[2]+searchrect[3])/20.0*bfactor
                 #radius=(math.sqrt(mov[0]**2+mov[1]**2))/5.0*bfactor
                 newb=int(searchrect[2]*(0.9+0.1*factor))
@@ -1043,18 +1009,18 @@ class ProcessPicThread(threading.Thread):
             cv.PyrUp(temp,pyrimage)
             cv.PyrDown(pyrimage,temp)
 
-            #cv.Smooth(temp,temp,cv.CV_MEDIAN,3)
+            cv.Smooth(temp,temp,cv.CV_MEDIAN,3)
             #cv.Smooth(temp,temp2,cv.CV_BILATERAL,3,3,175,175)
 
             cv.Resize(temp,thresimg,cv.CV_INTER_CUBIC)
             
             
-            pixout,pixin=self.InOutVal(thresimg)
-            thres=int((pixin+pixout)/2)
+            #pixout,pixin=self.InOutVal(thresimg)
+            #thres=int((pixin+pixout)/2)
             
+            #cv.Threshold(thresimg,thresimg,thres,255,cv.CV_THRESH_BINARY)
+            cv.Threshold(thresimg,thresimg,0,255,cv.CV_THRESH_OTSU)
 
-            cv.Threshold(thresimg,thresimg,thres,255,cv.CV_THRESH_BINARY)
-            #cv.Threshold(thresimg,thresimg,0,255,cv.CV_THRESH_OTSU)
             #print 'return subimage'
             return thresimg, rect
     def InOutVal(self,img):
