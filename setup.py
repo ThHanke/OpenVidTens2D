@@ -30,7 +30,7 @@ setup(data_files = [('', ['calicon.png',
                             "packages": packages,
                             "dll_excludes": dll_excludes,
                             "bundle_files": 3,
-                            "dist_dir": "dist2",
+                            "dist_dir": "dist",
                             "xref": False,
                             
                             "skip_archive": False,

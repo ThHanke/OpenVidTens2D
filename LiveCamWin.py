@@ -1,5 +1,5 @@
-# -*- coding: cp1252 -*-
-import wx,cv,ctypes
+
+import wx,cv,ctypes,os
 import threading
 import Queue
 
@@ -224,6 +224,7 @@ class LiveCamWin(wx.Frame):
     def InitFileInterface(self):
 
         ID_LSERIES=wx.NewId()
+        ID_LFOLDER=wx.NewId()
         ID_GOTHROUGH=wx.NewId()
         self.dirname=config.ProgDir
         self.ScaledImg=cv.CreateImage((100,100),8,3)
@@ -239,6 +240,7 @@ class LiveCamWin(wx.Frame):
         Operate = wx.Menu()
         Menubar.Append(Operate,'&Operate')
         Operate.Append(ID_LSERIES,'&Load Series','Load image series')
+        Operate.Append(ID_LFOLDER,'&Load Directory','Load image series from Directory')
         Operate.Append(ID_GOTHROUGH,'&Gothrough','Go through series')
         self.SetMenuBar(Menubar)
         
@@ -248,6 +250,7 @@ class LiveCamWin(wx.Frame):
         self.Bind(wx.EVT_TIMER,self.GotoNextFile,id=self.ID_FTIMER)
 
         self.Bind(wx.EVT_MENU, self.LoadSeries, id=ID_LSERIES)
+        self.Bind(wx.EVT_MENU, self.LoadDir, id=ID_LFOLDER)
         self.Bind(wx.EVT_SLIDER,self.OnSlider)
         self.Bind(wx.EVT_MENU, self.GoThrough, id=ID_GOTHROUGH)
         
@@ -272,6 +275,7 @@ class LiveCamWin(wx.Frame):
         return True
 
     def LoadSeries(self, event):
+        
         filters = 'Image files (*.gif;*.png;*.jpg;*.tif;*.bmp)|*.gif;*.png;*.jpg;*.tif;*.bmp' 
         dlg = wx.FileDialog(self, "Select files", self.dirname, "", filters, wx.FD_MULTIPLE)
         if dlg.ShowModal() == wx.ID_OK:
@@ -294,6 +298,26 @@ class LiveCamWin(wx.Frame):
             self.imageslider.SetValue(1)
             self.OnSlider(True)
         return True
+    def LoadDir(self, event):
+        dlg = wx.DirDialog(self, "Select Directory", self.dirname,  wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST)
+        if dlg.ShowModal() == wx.ID_OK:
+            try:
+                self.dirname=dlg.GetPath()
+            except:
+                dlg.Destroy()
+                return False
+            self.filenames=os.listdir(self.dirname)
+            piccount=len(self.filenames)
+            self.imageslider.SetMin(1)
+            self.imageslider.SetMax(piccount)
+            self.imageslider.SetValue(piccount)
+            self.imageslider.Enable(True)
+            dlg.Destroy()
+            self.imageslider.SetValue(1)
+            self.OnSlider(True)
+        return True    
+                
+        
     def OnSlider(self, event, picnum=None):
         if picnum==None:
             picnum=(self.imageslider.GetValue())
