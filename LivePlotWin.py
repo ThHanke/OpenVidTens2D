@@ -3,10 +3,12 @@ import wx,cv
 import threading
 import Queue
 import os
+import string
 
 import wx.lib.plot as plot
 
 from time import clock
+from time import sleep
 
 #import globals
 import config
@@ -17,6 +19,12 @@ class LivePlotWin(wx.Frame):
         screensize=wx.Display().GetGeometry()
         wx.Frame.__init__(self,None,wx.ID_ANY,title='LivePlotWin',pos=(0,screensize[3]/2),size=(screensize[2]/2,screensize[3]/2),style= wx.DEFAULT_FRAME_STYLE ^ wx.CLOSE_BOX )
         self.status=self.CreateStatusBar()
+        self.status.SetFieldsCount(2)
+        self.status.SetStatusWidths([-1,65])
+
+        self.lasttime=0
+        self.acttime=0
+        self.framecount=0
 
         self.buttonpanel=wx.Panel(self, wx.ID_ANY, style=wx.NO_BORDER)
         self.buttonsizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -42,14 +50,7 @@ class LivePlotWin(wx.Frame):
         self.panel=wx.Panel(self.splitter, wx.ID_ANY, size=(500,500),style=wx.BORDER_SUNKEN)
         self.plotter = plot.PlotCanvas(self.panel)
         self.plotter.SetEnableLegend(True)
-
-        #spwan queue
-        self.dataqueue=Queue.PriorityQueue(-1)
-        #spawn pool of threads
-        for i in range(1):
-            t=DataProtoThread(self,self.dataqueue,i)
-
-        
+ 
         self.toqueue=list()
         self.itemlist=list()
         
@@ -75,17 +76,16 @@ class LivePlotWin(wx.Frame):
         self.sizer.Add(self.buttonpanel,0,wx.EXPAND)
         self.sizer.Add(self.splitter,1,wx.EXPAND)
         self.SetSizer(self.sizer)
-        
-        #menu=self.CreateMenu(self.parent)
-        #self.SetMenuBar(menu)
 
-        
-        #elf.Bind(wx.EVT_CLOSE, self.OnClose)
-        #self.Bind(wx.EVT_MENU, self.CreateVidFace, id=ID_VIDFACE)
+        #spwan queue
 
-        config.EVT_RESULT(self, self.PicProcessed)
+        self.plotwritequeue=Queue.LifoQueue(1)
+        #spawn pool of threads
+        t=DataProtoThread(self,self.winsource.resultqueuePlot,self.plotwritequeue)
 
-        
+        #spawn pool of threads
+        t=PlotWriteThread(self,self.plotwritequeue)
+
         self.startbutton.Bind(wx.EVT_BUTTON, self.OnStart)
         self.stopbutton.Bind(wx.EVT_BUTTON, self.OnStop)
         self.clearbutton.Bind(wx.EVT_BUTTON, self.OnClear)
@@ -212,7 +212,6 @@ class LivePlotWin(wx.Frame):
                                     self.data = list()
                                     this=str(self.tree.GetItemText(parent)),int(self.tree.GetItemText(item)),str(self.tree.GetItemText(subitem))
                                     self.toplotlist.append(this)
-        #self.BuildTreeCtrl()
 
     def BuildTreeCtrl(self):
         
@@ -271,6 +270,7 @@ class LivePlotWin(wx.Frame):
                     grandchild=self.tree.GetNextChild(grandchild[0],grandchild[1])
                 child=self.tree.GetNextChild(child[0],child[1])
     def PicProcessed(self,event):
+        # will not be called
         if event.msg=="Pic processed!":
             fromqueue=self.winsource.resultqueuePlot.get()
             self.winsource.resultqueuePlot.task_done()
@@ -284,9 +284,12 @@ class LivePlotWin(wx.Frame):
             if len(self.itemlist)>0:
                 
                 self.toqueue.append((timestamp, self.elliplist, self.connectlist,self.toplotlist,self.tofile,self.winsource.calibrated,self.winsource.CalibData.intrinsic,self.winsource.CalibData.distortion,self.shouldclear))
-                if len(self.toqueue)>=1: 
+
+                try:
                     self.dataqueue.put(self.toqueue)
-                    self.toqueue=list()
+                except Queue.Full:
+                    print 'plotdataqueue full'
+                self.toqueue=list()
             if len(self.itemlist)!=len(self.elliplist)+len(self.connectlist):
                 #print "rebuild tree 2"
                 self.itemlist=list()
@@ -296,29 +299,31 @@ class LivePlotWin(wx.Frame):
             if self.shouldclear:
                 print 'ok'
                 self.shouldclear=False
-            #print self.timestamp, len(self.elliplist)
-            #print self.resultqueue.qsize()
-            #self.Replot()
+
         if event.msg=="Data ready!":
             
             #print "Data received"
-                #print len(self.itemlist),len(elliplist),len(connectlist)
-            #print event.data
-            self.called+=1
-            if self.called<=1:
-                #for plotting
-                panelwidth,panelheight=self.panel.GetSize()
-                self.plotter.SetSize(size=(panelwidth,panelheight))
-                
-                if len(event.data[0])>0:
-                    gc = plot.PlotGraphics(event.data[0], '', 'Time [s]', '[pixel]')
-                    self.plotter.Draw(gc)
-                    self.plotter.SetXSpec('min')
-                    self.plotter.SetYSpec('min')   
-                    self.plotter.Redraw()
-                self.called=0
-                if self.tofile:
-                    self.fp.writelines(event.data[1])
+            self.acttime=clock()
+            if self.acttime-self.lasttime<1:
+                self.framecount+=1
+            else:
+                self.SetStatusText('FPS: '+str(self.framecount),1)
+                self.framecount=1
+                self.lasttime=self.acttime
+ 
+            #for plotting
+            panelwidth,panelheight=self.panel.GetSize()
+            self.plotter.SetSize(size=(panelwidth,panelheight))
+
+            datatoqueue=list()
+            datatoqueue.append((event.data[0],self.toplotlist, self.plotter))
+            try:
+                self.plotwritequeue.put(datatoqueue,False)
+            except Queue.Full:
+                print 'plotdraw queue full'
+
+            if self.tofile:
+                self.fp.writelines(event.data[1])
     def OnClose(self,event):
         for item in self.childs:
             item.OnClose(True)
@@ -327,17 +332,13 @@ class LivePlotWin(wx.Frame):
 class DataProtoThread(threading.Thread):
     """Background Worker Thread Class."""
 
-    def __init__(self, parent,dataqueue,num):
+    def __init__(self, parent,dataqueue,resultqueue):
         """Init Worker Thread Class."""
         threading.Thread.__init__(self)
         self.parent=parent
         self.dataqueue=dataqueue
-        #self.piclistqueue=piclistqueue
-       
-        self.num=num
+        self.resultqueue=resultqueue
         self.data=list()
-        self.plotlist=list()
-        self.colours=('BLACK','RED','BLUE','GREEN','PINK','YELLOW','CYAN','PEACHPUFF','TURQUOSE','DARKRED','DARKBLUE','DARKGREEN')
         self.tofile=False
         self.filename=None
         self.fp=None
@@ -345,156 +346,150 @@ class DataProtoThread(threading.Thread):
         self.start()
         
         # start the thread
-  
     def run(self):
-        #print "Aquirethread started "+str(self.num)
+        #print "Aquirethread started "
         while True:
         
-            pointerlist=self.dataqueue.get()
-            #print "DataProtothread got task"+ " "+str(self.num)+" "+str(len(pointerlist))
+            (self.timestamp,self.image, self.elliplist, self.connectlist)=self.dataqueue.get()
+            #print "DataProtothread got task"
             resultstring=''
             string=''
+
+            temp=cv.CreateImageHeader((self.image[1],self.image[2]), cv.IPL_DEPTH_8U, 3)
+            cv.SetData(temp, self.image[0])
+            self.image=temp
+
+            if len(self.parent.itemlist)!=len(self.elliplist)+len(self.connectlist):
+                #print "rebuild tree 1" 
+                self.parent.itemlist=list()
+                self.parent.itemlist.extend(self.elliplist)
+                self.parent.itemlist.extend(self.connectlist)
+                self.parent.BuildTreeCtrl()
             
-            for item in pointerlist:
+            
+            self.toplotlist=self.parent.toplotlist
+            self.tofile=self.parent.tofile
+            self.calibrated=self.parent.winsource.calibrated
+            self.intrinsic=self.parent.winsource.CalibData.intrinsic
+            self.distortion=self.parent.winsource.CalibData.distortion
+            self.shouldclear=self.parent.shouldclear
 
-                self.timestamp=item[0]
-                self.elliplist=item[1]
-                self.connectlist=item[2]
-                self.toplotlist=item[3]
-                self.tofile=item[4]
-                self.calibrated=item[5]
-                self.intrinsic=item[6]
-                self.distortion=item[7]
-                self.shouldclear=item[8]
 
-                if self.shouldclear:
-                    self.data=list()
+            if self.parent.shouldclear:
+                self.data=list()
+                self.parent.shouldclear=False
+          
+            #plot selection and write to file
+            plotlist=list()
+       
+            for listpos, item in enumerate(self.toplotlist):
+                self.toplot=self.toplotlist[listpos]
+                if listpos<len(self.data):
+                    temp=self.data[listpos]
+                else:
+                    temp=list()
+               
+                time=self.timestamp
+                if self.toplot[0]=='Connection':
                     
-               
-                
-                
-                #plot selection and write to file
-                plotlist=list()
-##                if self.tofile and self.fp==None:
-##                    self.fp=open(self.filename,'w',1)
-##                    #write header
-##                    for i in range(len(self.toplotlist)):
-##                        if i==0:
-##                            string='Time'+'\t'
-##                        else:
-##                            string=string+'\t'
-##                        string= string+str(self.toplotlist[i])
-##                    self.fp.writelines(string+'\n')
-               
-                for listpos, item in enumerate(self.toplotlist):
-                    self.toplot=self.toplotlist[listpos]
-                    if listpos<len(self.data):
-                        temp=self.data[listpos]
+                    linepar=config.LinePar()
+                    epar1=config.EllipPar()
+                    epar2=config.EllipPar()
+                    if self.GetConnectWithNum(self.connectlist,self.toplot[1]) == None:
+                        #print 'no connect'
+                        continue
                     else:
-                        temp=list()
-                   
-                    time=self.timestamp
-                    if self.toplot[0]=='Connection':
-                        
-                        linepar=config.LinePar()
-                        epar1=config.EllipPar()
-                        epar2=config.EllipPar()
-                        if self.GetConnectWithNum(self.connectlist,self.toplot[1]) == None:
-                            #print 'no connect'
-                            continue
-                        else:
-                            linepar=self.GetConnectWithNum(self.connectlist,self.toplot[1])
-                        
-                        if self.GetEllipWithNum(self.elliplist,linepar.Pt1)== None or self.GetEllipWithNum(self.elliplist,linepar.Pt2) == None:
-                            #print 'no points'
-                            continue
-                        else:
-                            epar1=self.GetEllipWithNum(self.elliplist,linepar.Pt1)
-                            epar2=self.GetEllipWithNum(self.elliplist,linepar.Pt2)
+                        linepar=self.GetConnectWithNum(self.connectlist,self.toplot[1])
+                    
+                    if self.GetEllipWithNum(self.elliplist,linepar.Pt1)== None or self.GetEllipWithNum(self.elliplist,linepar.Pt2) == None:
+                        #print 'no points'
+                        continue
+                    else:
+                        epar1=self.GetEllipWithNum(self.elliplist,linepar.Pt1)
+                        epar2=self.GetEllipWithNum(self.elliplist,linepar.Pt2)
 
+                    #correct position concerning cam calibration
+
+                    if self.calibrated:
+                        x1,y1=self.KoordinatestoUndist(self.intrinsic,self.distortion,epar1.MidPos[0],epar1.MidPos[1])
+                        x2,y2=self.KoordinatestoUndist(self.intrinsic,self.distortion,epar2.MidPos[0],epar2.MidPos[1])
+                        rx,ry=abs(x1-x2),abs(y1-y2)
+                        
+                    else:
+                        rx,ry=abs(epar1.MidPos[0]-epar2.MidPos[0]),abs(epar1.MidPos[1]-epar2.MidPos[1])
+                    
+                        
+                    c=(rx**2.0+ry**2.0)**0.5
+                    if self.toplot[2]=='Range x':
+                        this=rx
+                    if self.toplot[2]=='Range y':
+                        this=ry
+                    if self.toplot[2]=='Lenght':
+                        this=c
+                    temp.append((time,this))
+                if self.toplot[0]=='Ellipse':
+                    ellip=config.EllipPar()
+                    if self.GetEllipWithNum(self.elliplist,self.toplot[1])== None:
+                        continue
+                    else:
+                        epar=self.GetEllipWithNum(self.elliplist,self.toplot[1])
                         #correct position concerning cam calibration
-
                         if self.calibrated:
-                            x1,y1=self.KoordinatestoUndist(self.intrinsic,self.distortion,epar1.MidPos[0],epar1.MidPos[1])
-                            x2,y2=self.KoordinatestoUndist(self.intrinsic,self.distortion,epar2.MidPos[0],epar2.MidPos[1])
-                            rx,ry=abs(x1-x2),abs(y1-y2)
-                            
-                        else:
-                            rx,ry=abs(epar1.MidPos[0]-epar2.MidPos[0]),abs(epar1.MidPos[1]-epar2.MidPos[1])
+                            epar.MidPos[0],epar.MidPos[1]=self.KoordinatestoUndist(self.intrinsic,self.distortion,epar.MidPos[0],epar.MidPos[1])
                         
-                        #if self.winsource.winsource.calibrated:
-                        #    rx,ry=self.KoordinatestoUndist(self.winsource.winsource,rx,ry)
-                            
-                        c=(rx**2.0+ry**2.0)**0.5
-                        if self.toplot[2]=='Range x':
-                            this=rx
-                        if self.toplot[2]=='Range y':
-                            this=ry
-                        if self.toplot[2]=='Lenght':
-                            this=c
+                        if self.toplot[2]=='MidPos x':
+                            this=epar.MidPos[0]
+                        if self.toplot[2]=='MidPos y':
+                            this=epar.MidPos[1]
+                        if self.toplot[2]=='Size a':
+                            this=epar.Size[0]
+                        if self.toplot[2]=='Size b':
+                            this=epar.Size[1]
+                        if self.toplot[2]=='Angle':
+                            this=epar.Angle
                         temp.append((time,this))
-                    if self.toplot[0]=='Ellipse':
-                        ellip=config.EllipPar()
-                        if self.GetEllipWithNum(self.elliplist,self.toplot[1])== None:
-                            continue
-                        else:
-                            epar=self.GetEllipWithNum(self.elliplist,self.toplot[1])
-                            #correct position concerning cam calibration
-                            if self.calibrated:
-                                epar.MidPos[0],epar.MidPos[1]=self.KoordinatestoUndist(self.intrinsic,self.distortion,epar.MidPos[0],epar.MidPos[1])
-                            
-                            if self.toplot[2]=='MidPos x':
-                                this=epar.MidPos[0]
-                            if self.toplot[2]=='MidPos y':
-                                this=epar.MidPos[1]
-                            if self.toplot[2]=='Size a':
-                                this=epar.Size[0]
-                            if self.toplot[2]=='Size b':
-                                this=epar.Size[1]
-                            if self.toplot[2]=='Angle':
-                                this=epar.Angle
-                            temp.append((time,this))
-                    if self.tofile:
-                        if listpos==0:
-                            string=str(time)+'\t'
-                        else:
-                            string=string+'\t'
-                        string= string+str(this)
-
-                    
-                    if len(temp)>200:
-                        delelem=temp.pop(0)
-                        del delelem
-                    if listpos<len(self.data):
-                        self.data[listpos]=temp
+                if self.tofile:
+                    if listpos==0:
+                        string=str(time)+'\t'
                     else:
-                        self.data.append(temp)
-##                if self.tofile:
-##                    self.fp.writelines(string+'\n')
-        ##        if self.tofile:
-        ##            self.fp.writelines(string+'\n')
-        ##            
-        ##            try:
-        ##                #scale down to 720x560
-        ##                cv.Resize(self.winsource.image,self.vidframe,cv.CV_INTER_NN)
-        ##                cv.CvtColor(self.vidframe,self.vidframe,cv.CV_RGB2BGR)
-        ##                cv.WriteFrame(self.videowriter,self.vidframe)
-        ##            except:
-        ##                pass
-                for i in range(len(self.data)):
-                    line = plot.PolyLine(self.data[i], colour=self.colours[i], width=1,legend=self.toplotlist[i][0]+' '+str(self.toplotlist[i][1]))
-                    plotlist.append(line)
-                    marker = plot.PolyMarker(self.data[i], colour=self.colours[i] ,marker='circle',width=1, size=1,legend=self.toplotlist[i][2])
-                    plotlist.append(marker)
-                    self.plotlist=plotlist
-                    
-                resultstring=resultstring+string+'\n'
+                        string=string+'\t'
+                    string= string+str(this)
 
                 
-            wx.PostEvent(self.parent, config.ResultEvent("Data ready!",(self.plotlist,resultstring)))
+                if len(temp)>200:
+                    delelem=temp.pop(0)
+                    del delelem
+                if listpos<len(self.data):
+                    self.data[listpos]=temp
+                else:
+                    self.data.append(temp)
+                if self.tofile:
+                    self.parent.fp.writelines(string+'\n')
+    ##        if self.tofile:
+    ##            self.fp.writelines(string+'\n')
+    ##            
+    ##            try:
+    ##                #scale down to 720x560
+    ##                cv.Resize(self.winsource.image,self.vidframe,cv.CV_INTER_NN)
+    ##                cv.CvtColor(self.vidframe,self.vidframe,cv.CV_RGB2BGR)
+    ##                cv.WriteFrame(self.videowriter,self.vidframe)
+    ##            except:
+    ##                pass
+##                for i in range(len(self.data)):
+##                    line = plot.PolyLine(self.data[i], colour=self.colours[i], width=1,legend=self.toplotlist[i][0]+' '+str(self.toplotlist[i][1]))
+##                    plotlist.append(line)
+##                    marker = plot.PolyMarker(self.data[i], colour=self.colours[i] ,marker='circle',width=1, size=1,legend=self.toplotlist[i][2])
+##                    plotlist.append(marker)
+##                    self.plotlist=plotlist
                     
+            #resultstring=resultstring+string+'\n'
+
+            try:
+                self.resultqueue.put(self.data,False)
+            except Queue.Full:
+                pass
                     
-            self.dataqueue.task_done()
+            #self.dataqueue.task_done()
     def GetEllipWithNum(self,liste,num):
         found=False
         for listpos, item in enumerate(liste):
@@ -533,4 +528,42 @@ class DataProtoThread(threading.Thread):
         newx=new[0]
         newy=new[1]
         return newx,newy
-    
+
+class PlotWriteThread(threading.Thread):
+    """Background Worker Thread Class."""
+
+    def __init__(self, parent, plotwritequeue):
+        """Init Worker Thread Class."""
+        threading.Thread.__init__(self)
+        self.plotwritequeue=plotwritequeue
+        self.parent=parent
+        self.colours=('BLACK','RED','BLUE','GREEN','PINK','YELLOW','CYAN','PEACHPUFF','TURQUOSE','DARKRED','DARKBLUE','DARKGREEN')
+        self.setDaemon(True)
+        self.start()
+        # start the thread
+
+    def run(self):
+        #print "Aquirethread started "+str(self.num)
+        while True:
+            data=self.plotwritequeue.get()
+            #print "Aquirethread got task"+ " "+str(self.num)+" "+str(len(pointerlist))
+            plotlist=list()
+
+            for i in range(len(data)):
+                
+                line = plot.PolyLine(data[i],colour=self.colours[i], width=1)
+                plotlist.append(line)
+                marker = plot.PolyMarker(data[i], marker='circle',colour=self.colours[i],width=1, size=1)
+                plotlist.append(marker)
+
+            if len(plotlist)>0:
+                panelwidth,panelheight=self.parent.panel.GetSize()
+                self.parent.plotter.SetSize(size=(panelwidth,panelheight))
+                
+                gc = plot.PlotGraphics(plotlist, '', 'Time [s]', '[pixel]')
+                self.parent.plotter.Draw(gc)
+                self.parent.plotter.SetXSpec('min')
+                self.parent.plotter.SetYSpec('min')   
+                self.parent.plotter.Redraw()
+        self.plotwritequeue.task_done()
+

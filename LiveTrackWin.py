@@ -1,19 +1,29 @@
 # -*- coding: cp1252 -*-
 import wx,cv
 import threading
-import Queue
+
+
 import math
 import pickle
+import Queue
+
+import multiprocessing
 
 #import globals
 import config
 
 from time import sleep
+from time import clock
 
 ID_CCAL=wx.NewId()
 ID_CCALL=wx.NewId()
 ID_CCALS=wx.NewId()
 ID_PICKALL=wx.NewId()
+
+def contour_iterator(contour):
+    while contour:
+        yield contour
+        contour = contour.h_next()
 
 class LiveTrackWin(wx.Frame):
     def __init__(self,source):
@@ -21,6 +31,12 @@ class LiveTrackWin(wx.Frame):
         screensize=wx.Display().GetGeometry()
         wx.Frame.__init__(self,None,wx.ID_ANY,title='LiveTrackWin',pos=(screensize[2]/2,0),size=(screensize[2]/2,screensize[3]/2),style= wx.DEFAULT_FRAME_STYLE ^ wx.CLOSE_BOX   )
         self.status=self.CreateStatusBar()
+        self.status.SetFieldsCount(2)
+        self.status.SetStatusWidths([-1,65])
+
+        self.lasttime=0
+        self.acttime=0
+        self.framecount=0
         
         self.panel=wx.Panel(self, wx.ID_ANY, style=wx.BORDER_SUNKEN)
         self.panelsizer=wx.BoxSizer(wx.HORIZONTAL)
@@ -29,8 +45,6 @@ class LiveTrackWin(wx.Frame):
 
         menu=self.CreateMenu()
         self.SetMenuBar(menu)
-
-        
 
         self.Bind(wx.EVT_MENU, self.CameraCalibration, id=ID_CCAL)
         self.Bind(wx.EVT_MENU, self.LoadCalibration, id=ID_CCALL)
@@ -45,21 +59,12 @@ class LiveTrackWin(wx.Frame):
         self.panel.Bind(wx.EVT_MOTION,self.MouseMove)
         self.panel.Bind(wx.EVT_RIGHT_UP,self.MouseRightClick)
 
-        config.EVT_RESULT(self, self.PicProcessed)
-
         #spwan queue
-        self.piclistqueue=Queue.Queue(-1)
-        self.resultqueueTrack=Queue.Queue(-1)
-        self.resultqueuePlot=Queue.Queue(-1)
-        self.bmppaintqueue=Queue.Queue(-1)
-        #spawn pool of threads
-        for i in range(1):
-            t=ProcessPicThread(self,self.piclistqueue,self.resultqueueTrack,self.resultqueuePlot,i)
 
-        #spawn pool of threads
-        for i in range(1):
-            t=BmpPaintThread(self.bmppaintqueue,i)
-        
+        self.resultqueueTrack=multiprocessing.Queue(1)
+        self.resultqueuePlot=multiprocessing.Queue(1)
+
+        self.parentendpipe,self.childendpipe=multiprocessing.Pipe()
         
         #StartVariablen
         self.zoomval=0
@@ -69,19 +74,25 @@ class LiveTrackWin(wx.Frame):
         self.mousein=False
         self.newellip=None
         self.newcon=None
+        self.timestamp=0
         self.elliplist=list()
         self.connectlist=list()
         self.rightdown=False, (None,None), (None,None)
         self.PickAll=False
+
 
         self.CalibData=CalibData()
         self.calibrated=False
         
         self.childs=list()
 
+        t=ProcessPicThread(self.childendpipe,self.winsource.totrackqueue,self.resultqueueTrack,self.resultqueuePlot,0)
+        #init variables in backgroundprocess
+        self.SendStatustoBackgroundProcess()
+
+        t=BmpPaintThread(self,self.resultqueueTrack)
 
         self.Show()
-
     def CreateMenu(self):
         Menubar =wx.MenuBar()
         Operate = wx.Menu()
@@ -92,88 +103,18 @@ class LiveTrackWin(wx.Frame):
         Operate.Append(ID_CCAL,'&Calibration','Camera Calibration')
         Operate.Append(ID_PICKALL,'&Pick All','Try to pick all ellipses')
         
-        return Menubar
-    
-    def PicProcessed(self, event):
-        if event.msg=="Pic to Queue!":
-            #print 'got pics'
-            datatoqueue=list()
-            datatoqueue.append((event.data[0],event.data[1], self.elliplist, self.connectlist,self.newellip,self.childs,self.PickAll))
-            self.actualgrayimage=event.data[1]
-            self.piclistqueue.put(datatoqueue,False)
-            self.newellip=None
-            self.PickAll=False
-        if event.msg=="Pic processed!":
-            
-            fromqueue=self.resultqueueTrack.get()
-            self.timestamp, self.image,  self.elliplist, self.connectlist,   =fromqueue[0],fromqueue[1],fromqueue[2], fromqueue[3]
-            
-            
-            self.resultqueueTrack.task_done()
-            #print self.timestamp, len(self.elliplist)
-            #print self.resultqueueTrack.qsize()
-            self.Replot()
-
+        return Menubar   
     def Replot(self):
-        winsize=self.GetSize()
-        #print "start replot"+" "+str(len(self.elliplist))+" time "+str(self.timestamp)
-
-        
-        #coords connection in build
-
-        if self.rightdown[0]:
-            isin,num=self.PosInFoundEllip(self.rightdown[1],self.elliplist)
-            if isin:
-                epar=self.GetEllipWithNum(self.elliplist,num)
-                self.newcon=config.LinePar()
-                self.newcon.Pt1=num
-                self.newcon.Pt2=num
-                self.newcon.Pos=self.rightdown[2]
-
-                epar=self.GetEllipWithNum(self.elliplist,self.newcon.Pt1)
-
-            else:
-                self.rightdown=False, (None,None), (None,None)
-                self.newcon=None
-        if not self.rightdown[0] and isinstance(self.newcon,config.LinePar):
-            
-            isin,num=self.PosInFoundEllip(self.rightdown[2],self.elliplist)
-            if isin:
-                self.newcon.Pt2=num
-                if self.newcon.Pt1==self.newcon.Pt2:
-                    
-                    epar=self.GetEllipWithNum(self.elliplist,self.newcon.Pt1)
-                    self.elliplist.remove(epar)
-                   
-                    self.newcon=None
-                    self.rightdown=False, (None,None), (None,None)
-                else:
-                 
-                    self.newcon.Num=self.NumConnect(self.connectlist)
-                    #print "connection appended"
-                    self.connectlist.append(self.newcon)
-                    self.newcon=None
-                    self.rightdown=False, (None,None), (None,None)
-            else:
-
-                self.rightdown=False, (None,None), (None,None)
-                self.newcon=None
-
-        if self.zoomrect==None:
-            self.zoomrect=(0,0,self.image.width,self.image.height)
-            self.status.SetStatusText('Auflösung='+str(self.zoomrect[2])+'x'+str(self.zoomrect[3]))
-            
-        
-        gc=wx.ClientDC(self.panel)
-        self.panelwidth,self.panelheight=gc.GetSize()
-        datatoqueue=list()
-        datatoqueue.append((self.image,self.zoomrect, gc,self.rightdown, self.elliplist, self.connectlist))
-        self.bmppaintqueue.put(datatoqueue,False)
+        #only used in fileinterface
+        try:
+            self.resultqueueTrack.put((self.timestamp,self.imagetuple, self.elliplist, self.connectlist,0),False)
+        except Queue.Full:
+            pass
+    def SendStatustoBackgroundProcess(self):
+        self.parentendpipe.send((self.newellip,self.PickAll,self.rightdown))
     def Mousewheel(self,event):
         if self.mousein:
             pt = event.GetPosition()
-            #get mouse pic koords
-            
             pos=self.Panel2ImageKoord(self.panelwidth,self.panelheight,self.zoomrect,pt)
             rot= event.GetWheelRotation()
             rot=rot/event.GetWheelDelta()
@@ -184,16 +125,17 @@ class LiveTrackWin(wx.Frame):
             self.status.SetStatusText('Pos='+str(pos)+ ' Zoom=' + str(self.zoomval))
             #newzoomrect
             if self.zoomval>0:
-                width=int(float(self.image.width)/float(self.zoomval))
-                height=int(float(self.image.height)/float(self.zoomval))
+                width=int(float(self.imagetuple[1])/float(self.zoomval))
+                height=int(float(self.imagetuple[2])/float(self.zoomval))
                 orx=pos[0]-int(float(width)/2)
                 ory=pos[1]-int(float(height)/2)
                 self.zoomrect=(orx,ory,width,height)
-                if not self.CheckSubRect(self.image,self.zoomrect):
-                    self.zoomrect=self.GetProperSubRect(self.image,self.zoomrect,True)
+                if not self.CheckSubRect(self.imagetuple,self.zoomrect):
+                    self.zoomrect=self.GetProperSubRect(self.imagetuple,self.zoomrect,True)
             else:
-                self.zoomrect=(0,0,self.image.width,self.image.height)
-            self.Replot()
+                self.zoomrect=(0,0,self.imagetuple[1],self.imagetuple[2])
+            if self.winsource.isfileinterface:
+                self.Replot()
     def MouseInWindow(self,event):
         self.mousein=True
     def MouseOutWindow(self,event):
@@ -204,18 +146,16 @@ class LiveTrackWin(wx.Frame):
             pt = event.GetPosition()
             #get mouse pic koords
             self.newellip=self.Panel2ImageKoord(self.panelwidth,self.panelheight,self.zoomrect,pt)
+            self.SendStatustoBackgroundProcess()
+            
             if self.winsource.isfileinterface:
-                wx.PostEvent(self, config.ResultEvent("Pic to Queue!",(self.timestamp,self.actualgrayimage)))
-                
+                #print 'onSlider'
+                self.winsource.OnSlider(True)            
     def MouseRightClick(self,event):
- 
-
         if event.RightDown()and self.mousein:
             pt = event.GetPosition()
-            #get mouse pic koords
             pos=self.Panel2ImageKoord(self.panelwidth,self.panelheight,self.zoomrect,pt)
             #in ellip?
-            
             self.rightdown=True, pos, pos
             #print self.rightdown
         if event.RightUp()and self.mousein:
@@ -223,18 +163,24 @@ class LiveTrackWin(wx.Frame):
             #get mouse pic koords
             pos=self.Panel2ImageKoord(self.panelwidth,self.panelheight,self.zoomrect,pt)
             self.rightdown=False,self.rightdown[1],pos
+            #send to background process
+            self.SendStatustoBackgroundProcess()
             #print self.rightdown
             if self.winsource.isfileinterface:
-                wx.PostEvent(self, config.ResultEvent("Pic to Queue!",(self.timestamp,self.actualgrayimage)))    
-
+                self.winsource.OnSlider(True)
     def MouseMove(self,event):
         if self.mousein:
+            if self.parentendpipe.poll():
+                print 'polled and not empty'
+                (self.timestamp, self.elliplist, self.connectlist)=self.parentendpipe.recv()
+                print 'update recevied'
             if event.RightIsDown()and self.rightdown[0]:
                 pt = event.GetPosition()
                 #get mouse pic koords
                 self.rightdown=True,self.rightdown[1],self.Panel2ImageKoord(self.panelwidth,self.panelheight,self.zoomrect,pt)
                 #print self.rightdown
-                self.Replot()
+                if self.winsource.isfileinterface:
+                    self.Replot()
     def CameraCalibration(self,event):
         filters = 'Image files (*.gif;*.png;*.jpg;*.bmp)|*.gif;*.png;*.jpg;*.bmp' 
         
@@ -343,12 +289,6 @@ class LiveTrackWin(wx.Frame):
         filecalib=open(filename,'w')
         pickle.dump((intrinsic,distortion),filecalib)
         filecalib.close()
-        #dlg = wx.FileDialog(self, "Save distortion camera matrix as", directory, filename, 'xml files (*.xml)|*.xml', wx.SAVE)
-        #if (dlg.ShowModal()==wx.ID_OK):
-        #    filename=dlg.GetFilename()
-        #    directory=dlg.GetDirectory()
-        #dlg.Destroy()
-        #cv.Save( filename, self.CalibData.distortion )
     
     def CvMattoPythonArray(self,cvmat):
         array=list()
@@ -401,7 +341,7 @@ class LiveTrackWin(wx.Frame):
         pos=int(float(pt[0])/float(panelwidth)*zoomrect[2]+zoomrect[0]),int(float(pt[1])/float(panelheight)*zoomrect[3]+zoomrect[1])
         return pos
     def CheckSubRect(self,image,rect):
-        if (rect[0]+rect[2])<=image.width and (rect[1]+rect[3])<=image.height and rect[0]>=0 and rect[1]>=0 and rect[2]>=20 and rect[3]>=20:
+        if (rect[0]+rect[2])<=image[1] and (rect[1]+rect[3])<=image[2] and rect[0]>=0 and rect[1]>=0 and rect[2]>=20 and rect[3]>=20:
             return True
         else:
             return False
@@ -415,13 +355,13 @@ class LiveTrackWin(wx.Frame):
                 ory=0
             else:
                 ory=rect[1]
-            if (rect[0]+rect[2])>image.width:
-                width=image.width-rect[0]
+            if (rect[0]+rect[2])>image[1]:
+                width=image[1]-rect[0]
                 
             else:
                 width=rect[2]    
-            if (rect[1]+rect[3])>image.height:
-                height=image.height-rect[1]
+            if (rect[1]+rect[3])>image[2]:
+                height=image[2]-rect[1]
             else:
                 height=rect[3]   
             rect=(orx,ory,width,height)
@@ -435,10 +375,10 @@ class LiveTrackWin(wx.Frame):
                 ory=0
             else:
                 ory=rect[1]
-            if (rect[0]+rect[2])>image.width:
-                orx=image.width-rect[2]
-            if (rect[1]+rect[3])>image.height:
-                ory=image.height-rect[3]  
+            if (rect[0]+rect[2])>image[1]:
+                orx=image[1]-rect[2]
+            if (rect[1]+rect[3])>image[2]:
+                ory=image[2]-rect[3]  
             rect=(orx,ory,rect[2],rect[3])
         return rect
     def GetEllipWithNum(self,liste,num):
@@ -494,137 +434,141 @@ class LiveTrackWin(wx.Frame):
         self.Destroy()
         
 ##
-class ProcessPicThread(threading.Thread):
+class ProcessPicThread(multiprocessing.Process):
     """Background Worker Thread Class."""
 
-    def __init__(self, parent, piclistqueue,resultqueuetrack,resultqueuedata, num):
+    def __init__(self, pipeend, piclistqueue,resultqueuetrack, resultqueuedata, num=0):
         """Init Worker Thread Class."""
-        threading.Thread.__init__(self)
-        self.font=cv.InitFont(cv.CV_FONT_HERSHEY_DUPLEX,1,1,0,1,8)
-        self.parent=parent
+        multiprocessing.Process.__init__(self)
+        #self.font=cv.InitFont(cv.CV_FONT_HERSHEY_DUPLEX,1,1,0,1,8)
+        self.pipeend=pipeend
         self.queue=piclistqueue
         self.out_queue1=resultqueuetrack
         self.out_queue2=resultqueuedata
 
-
+        self.lasttime=0
+        self.framecount=0
+        self.actframecount=0
          
         self.num=num
         self.elliplist=list()
         self.connectlist=list()
-        self.setDaemon(True)
+        self.daemon=True
         self.start()
 
-     
-       
         # start the thread
-        
-
     def run(self):
-        #print "Picthread started "+str(self.num)
         while True:
-            pointerlist=self.queue.get()
-            #print "Picthread got task"+ " "+str(self.num)+" "+str(len(pointerlist))
+            #print 'running'
+            item=self.queue.get()
+            self.timestamp=item[0]
+            self.raw=item[1]
+            #print type(self.raw)
+            if self.pipeend.poll():
+                self.newellip,self.pickall,self.rightdown=self.pipeend.recv()
+            #print self.rightdown
+            self.newelliplist=list()
+            self.newconnectlist=list()
+            self.acttime=clock()
+            if self.acttime-self.lasttime<1:
+                self.framecount+=1
+            else:
+                # full second
+                self.actframecount=self.framecount
+                self.framecount=1
+                self.lasttime=self.acttime
 
-            for item in pointerlist:
+            if not self.rightdown[0] and self.rightdown[1]!=(None,None) and self.rightdown[2]!=(None,None):
+                #print self.parent.rightdown
+                newcon=config.LinePar()
+                isin, num=self.PosInFoundEllip(self.rightdown[1],self.elliplist)
+                if isin:
+                    newcon.Pt1=num
+                else:
+                    newcon.Pt1=None
+                isin, num=self.PosInFoundEllip(self.rightdown[2],self.elliplist)
+                if isin:
+                    newcon.Pt2=num
+                else:
+                    newcon.Pt2=None
 
-                #print 'in processthread'
-                #print item[5]
-                self.timestamp=item[0]
-                self.raw=item[1]
-                self.elliplist=item[2]
-                self.connectlist=item[3]
-                self.newellip=item[4]
-                self.CamChildren=item[5]
-                self.pickall=item[6]
-                self.newelliplist=list()
-                self.newconnectlist=list()
+                #print newcon.Pt1,newcon.Pt2
+
+                if newcon.Pt1!=newcon.Pt2 and newcon.Pt1!=None and newcon.Pt1!=None:
+                 
+                    newcon.Num=self.NumConnect(self.connectlist)
+                    #print "connection appended"
+                    self.connectlist.append(newcon)
+
+                    self.rightdown=False, (None,None), (None,None)
                 
+                if newcon.Pt1==newcon.Pt2 and newcon.Pt1!=None and newcon.Pt1!=None:
+                    
+                    epar=self.GetEllipWithNum(self.elliplist,newcon.Pt1)
+                    self.elliplist.remove(epar)
+                   
+                    self.rightdown=False, (None,None), (None,None)
+                else:
+                    del newcon
+                    self.rightdown=False, (None,None), (None,None)
+    
+            #print "before processing "+str(len(self.elliplist))+" "+str(self.timestamp)
 
-                
+            self.image=cv.CreateImage((self.raw[1],self.raw[2]),cv.IPL_DEPTH_8U,3)
+            temp=cv.CreateImageHeader((self.raw[1],self.raw[2]), cv.IPL_DEPTH_8U, 1)
+            cv.SetData(temp, self.raw[0])
+            self.raw=temp
+            cv.CvtColor(self.raw,self.image,cv.CV_GRAY2RGB)
 
-                if len(self.parent.elliplist)!=len(self.elliplist):
-                    numlist=list()
-                    for item in self.parent.elliplist:
-                        numlist.append(item.Num)
-                    for item in self.elliplist:
-                        if item.Num not in numlist:
-                            self.elliplist.remove(item)
-                            #print "item removed"
-                    #print numlist
+            if self.pickall:
+                #print 'pick all circles through hough transform'
+                self.PickAll(self.raw)
 
-        
-                #print "before processing "+str(len(self.elliplist))+" "+str(self.timestamp)
-
-                self.image=cv.CreateImage((self.raw.width,self.raw.height),cv.IPL_DEPTH_8U,3)
-                cv.CvtColor(self.raw,self.image,cv.CV_GRAY2RGB)
-
-                #gray = cv.CreateImage(cv.GetSize(self.raw), 8, 1)
-                
-
-                if self.pickall:
-                    #print 'pick all circles through hough transform'
-                    self.PickAll(self.raw)
-                
-
-
-
-
-
-                
-                if self.newellip!=None:
-                    #check if in already found ellip
-                    isin,num=self.PosInFoundEllip(self.newellip,self.elliplist)
-                    if not isin:
-                        #print 'pick ellip'
-                        ellip=self.PickEllip(self.raw,self.newellip[0],self.newellip[1],self.elliplist)    
-                        if not ellip==None:
-                            self.elliplist.append(ellip)
-                            
-                #print "thread "+str(self.num)+" ellip items to track"+ " "+str(len(self.elliplist))
-                if len(self.elliplist)>0:
-                    self.newelliplist, self.newconnectlist, self.image=self.ProcessImage(self.raw,self.image, self.elliplist, self.connectlist)
-                    #print "after processing "+str(len(self.newelliplist))
-                #print "thread "+str(self.num)+" ellip items tracked"+ " "+str(len(self.elliplist))
-
-                
-                
-                trackers=list()
-                trackers.append(self.parent) #put it to source
-                self.out_queue1.put((self.timestamp,self.image, self.newelliplist, self.newconnectlist),False)
-                
-                for window in self.CamChildren:
-                    trackers.append(window)
-                #    #if isinstance(window, LiveTrackWin)or isinstance(window, LivePlotWin):
-                    self.out_queue2.put((self.timestamp,self.image, self.newelliplist, self.newconnectlist),False)
+            if self.newellip!=None:
+                #check if in already found ellip
+                isin,num=self.PosInFoundEllip(self.newellip,self.elliplist)
+                if not isin:
+                    #print 'pick ellip'
+                    ellip=self.PickEllip(self.raw,self.newellip[0],self.newellip[1],self.elliplist)    
+                    if not ellip==None:
+                        self.elliplist.append(ellip)
+                        #print 'new ellip found'
+                    self.newellip=None
                         
-               
-                for window in trackers:
-                    wx.PostEvent(window, config.ResultEvent("Pic processed!",None))
-                    #self.out_queue.join()
-                
-            #self.elliplist,self.connectlist=self.newelliplist, self.newconnectlist        
-            self.queue.task_done()
+            if len(self.elliplist)>0:
+                self.newelliplist, self.newconnectlist, self.image=self.ProcessImage(self.raw,self.image, self.elliplist, self.connectlist)
+                #update elements
+                self.elliplist, self.connectlist=self.newelliplist, self.newconnectlist
 
+            
+            #print 'try to put in queue'
 
-        
+            try:
+                self.out_queue1.put((self.timestamp,(self.image.tostring(),self.image.width,self.image.height), self.newelliplist, self.newconnectlist,self.actframecount),False)
+            except Queue.Full:
+                ##print 'trackresultqueue1 full'
+                pass
+
+            
+            try:
+                self.out_queue2.put((self.timestamp,(self.image.tostring(),self.image.width,self.image.height), self.newelliplist, self.newconnectlist),False)
+            except Queue.Full:
+                ##print 'trackresultqueue2 full'
+                pass
+
     def ProcessImage(self, grayimage, rgbimage, ellipses,connections):
-
         #track ellipses
         ellipses=self.TrackEllip(grayimage,ellipses)
-
         #remove lost connections
         for listpos, item in enumerate(connections):
                     
             linepar=config.LinePar()
             linepar=connections[listpos]
-            
+
             if self.GetEllipWithNum(ellipses,linepar.Pt1)==None or self.GetEllipWithNum(ellipses,linepar.Pt2)==None:
                 #print "connection removed"
                 connections.remove(linepar)
-           
         return ellipses, connections, rgbimage
-
-
     def PickEllip(self,image,posx,posy,elliplist):
         found=0
         searchrectsize=20
@@ -634,61 +578,59 @@ class ProcessPicThread(threading.Thread):
         
         while found <1:
             searchrectsize=int(searchrectsize+searchrectsize/10)
-
+            
             searchrectr=(posx-searchrectsize,posy-searchrectsize,searchrectsize*2,searchrectsize*2)
+            #print searchrectsize,image.width
+
+            if searchrectsize*2>image.width:
+                break
             #print 'get search contour image'
             rectimage,searchrect=self.GetSearchCounturImage(image,searchrectr)
             #print 'search image created'
             if rectimage==None:
-                break
+                continue
+            #pixout,pixin=self.InOutVal(rectimage)
             if cv.CountNonZero(rectimage)<=10:
                 continue
 
-            cont=cv.FindContours (rectimage, stor, mode=cv.CV_RETR_TREE,method=cv.CV_CHAIN_APPROX_TC89_KCOS)
-            morecont=True
-            cont=cont.v_next()
-            if cont==None:
-                morecont=False
+            stor = cv.CreateMemStorage(0)
+            cont=cv.FindContours (rectimage, stor, cv.CV_RETR_LIST,cv.CV_CHAIN_APPROX_TC89_KCOS,(0, 0))
+            found=0
+            #print 'find contours'
             
-            while morecont:
-               # print 'points?'
-                if( len(cont) < 10):
-                    if len(cont)==0:
-                        break
-                    cont=cont.h_next()
-                    if cont==None:
-                        morecont=False
-                    continue
-                #print 'enought points'
-                ellipPar=self.FitEllipOnContour(cont)
-                
-                #define Number
-                ellipPar.Num=self.NumEllip(elliplist)
-                #print 'okb'
-                #korrekt pos and size to global
-                ellipPar.MidPos=ellipPar.MidPos[0]/rectimage.width*searchrect[2]+searchrect[0],ellipPar.MidPos[1]/rectimage.height*searchrect[3]+searchrect[1]
-                ellipPar.Size= ellipPar.Size[0]/rectimage.width*searchrect[2]/2,ellipPar.Size[1]/rectimage.height*searchrect[3]/2
-                ellipPar.mov=0,0
-                
-                if ellipPar.Size[1]!=0 and ellipPar.Size[0]!=0 and ellipPar.Size[1]<searchrect[3]/2 and ellipPar.Size[0]<searchrect[2]/2:
-                    #print 'picked'
-                    #print searchrectr
-                    ellipPar.searchrect=searchrect
-                    found=1
+            for c in contour_iterator(cont):
+                if len(c) >= 6:
+                    if cv.ContourArea(c)<=(rectimage.width*rectimage.height/50)or cv.ContourArea(c)>(rectimage.width*rectimage.height/2):
+                        continue
+                    #print 'process contours'
                     
-                
-                cont=cont.h_next()
-                if cont==None:
-                        morecont=False
-                if found==1:
-                    break
-            if searchrectsize*2>image.width:
-                
-                break
+                    # Fits ellipse to current contour.
+                    EllipParnew=self.FitEllipOnContour(c)
+
+                    cv.Rectangle(self.image,(searchrect[0],searchrect[1]),(int(searchrect[0]+searchrect[2]),int(searchrect[1]+searchrect[3])),cv.CV_RGB(255,0,0),1,8,0)
+
+                    
+                    #define Number
+                    EllipParnew.Num=self.NumEllip(elliplist)
+                    #korrekt pos and size to global
+                    EllipParnew.MidPos=EllipParnew.MidPos[0]/rectimage.width*searchrect[2]+searchrect[0],EllipParnew.MidPos[1]/rectimage.height*searchrect[3]+searchrect[1]
+                    EllipParnew.Size= EllipParnew.Size[0]/rectimage.width*searchrect[2]/2,EllipParnew.Size[1]/rectimage.height*searchrect[3]/2
+
+                    
+                    #EllipParnew.Angle=-EllipParnew.Angle
+                    EllipParnew.mov=0,0
+
+                    if  EllipParnew.Size[1]>=1 and EllipParnew.Size[0]>=1 and EllipParnew.Size[1]<searchrect[3]/2 and EllipParnew.Size[0]<searchrect[2]/2 :
+                    #if  EllipParnew.Size[1]!=0 and EllipParnew.Size[0]!=0  and (searchrect[0]+searchrect[2]*3/5.0)<EllipParnew.MidPos[0]<(searchrect[0]+searchrect[2]*4/5.0) and (searchrect[1]+searchrect[3]/3.0)<EllipParnew.MidPos[1]<(searchrect[1]+searchrect[3]/3.0*2.0):
+                        found=1
+                        EllipParnew.searchrect=searchrect
+                        break
+            
+            
             
         if found>=1:
-            
-            return ellipPar
+            #print 'found ellip'
+            return EllipParnew
         else:
             return None
 
@@ -716,34 +658,13 @@ class ProcessPicThread(threading.Thread):
             ellip=ellipses[listpos]
             
             b,h=self.GetAABBEllip(ellip)
-            #b,h=b+20,h+20
-##            b,h=int(b+b/2),int(h+h/2)
-##            if b<20 or h<20:
-##                aspect=float(b)/float(h)
-##                if aspect<1:
-##                    b=20
-##                    h=int(b/aspect)
-##                else:
-##                    h=20
-##                    b=int(h*aspect)
-            b,h=int(b*1.3),int(h*1.3)
+
+            b,h=int(b*1.5),int(h*1.5)
             if b<20:
                 b=20
             if h<20:
                 h=20
-##            if b<20 or h<20:
-##                aspect=float(b)/float(h)
-##                if aspect<1:
-##                    b=20
-##                    h=int(b/aspect)
-##                else:
-##                    h=20
-##                    b=int(h*aspect)
-            
-            #b,h=int(b+20),int(h+20)
-            
-            
-            
+
             #with movement correction
             searchrecttr = (int(ellip.MidPos[0]+int(ellip.mov[0])-b/2),int(ellip.MidPos[1]+int(ellip.mov[1])-h/2),int(b),int(h))
            
@@ -756,63 +677,36 @@ class ProcessPicThread(threading.Thread):
             #pixout,pixin=self.InOutVal(rectimage)
 
             stor = cv.CreateMemStorage(0)
-            cont=cv.FindContours (rectimage, stor, mode=cv.CV_RETR_TREE,method=cv.CV_CHAIN_APPROX_TC89_KCOS)
-
-          
-            morecont=True
+            cont=cv.FindContours (rectimage, stor, cv.CV_RETR_LIST,cv.CV_CHAIN_APPROX_TC89_KCOS,(0, 0))
             found=0
-            cont=cont.v_next()
-            if cont==None:
-                morecont=False
-            while morecont:
-                if( len(cont) < 6 or len(cont) >10000):
-                    #print 'low points'
-                    cont=cont.h_next()
-                    if cont==None:
-                        morecont=False
-                    continue
-                #print 'enought points'
-                
-                #test size of area
+            for c in contour_iterator(cont):
+                if len(c) >= 6:
+                    if cv.ContourArea(c)<=(rectimage.width*rectimage.height/50)or cv.ContourArea(c)>(rectimage.width*rectimage.height/2):
+                        continue
+                    
+                    # Fits ellipse to current contour.
+                    EllipParnew=self.FitEllipOnContour(c)
 
-                #print cv.ContourArea(cont)
-                #print rectimage.width*rectimage.height
+                    cv.Rectangle(self.image,(searchrect[0],searchrect[1]),(int(searchrect[0]+searchrect[2]),int(searchrect[1]+searchrect[3])),cv.CV_RGB(255,0,0),1,8,0)
+                    
+                    #define Number
+                    EllipParnew.Num=ellip.Num
+                    #korrekt pos and size to global
+                    EllipParnew.MidPos=EllipParnew.MidPos[0]/rectimage.width*searchrect[2]+searchrect[0],EllipParnew.MidPos[1]/rectimage.height*searchrect[3]+searchrect[1]
+                    EllipParnew.Size= EllipParnew.Size[0]/rectimage.width*searchrect[2]/2,EllipParnew.Size[1]/rectimage.height*searchrect[3]/2
 
-                if cv.ContourArea(cont)<=(rectimage.width*rectimage.height/50)or cv.ContourArea(cont)>(rectimage.width*rectimage.height/2):
-                    print 'area too small'
-                    cont=cont.h_next()
-                    if cont==None:
-                        morecont=False
-                    continue
-                
-                
-                EllipParnew=self.FitEllipOnContour(cont)
+                    
+                    #EllipParnew.Angle=-EllipParnew.Angle
+                    EllipParnew.mov=EllipParnew.MidPos[0]-ellip.MidPos[0],EllipParnew.MidPos[1]-ellip.MidPos[1]
 
-                #define Number
-                EllipParnew.Num=ellip.Num
-                #korrekt pos and size to global
-
-                EllipParnew.MidPos=EllipParnew.MidPos[0]/rectimage.width*searchrect[2]+searchrect[0],EllipParnew.MidPos[1]/rectimage.height*searchrect[3]+searchrect[1]
-                EllipParnew.Size= EllipParnew.Size[0]/rectimage.width*searchrect[2]/2,EllipParnew.Size[1]/rectimage.height*searchrect[3]/2
-                #EllipParnew.Angle=-EllipParnew.Angle
-                EllipParnew.mov=EllipParnew.MidPos[0]-ellip.MidPos[0],EllipParnew.MidPos[1]-ellip.MidPos[1]
-
-
-                #if EllipParnew.Size[1]!=0 and EllipParnew.Size[0]!=0  and 0.8<=ellip.Size[0]/EllipParnew.Size[0]<=1.2 and 0.8<=ellip.Size[1]/EllipParnew.Size[1]<=1.2 and (pixin>pixout+254 or pixin<pixout-254):
-                if EllipParnew.Size[1]!=0 and EllipParnew.Size[0]!=0  and 0.8<=ellip.Size[0]/EllipParnew.Size[0]<=1.2 and 0.8<=ellip.Size[1]/EllipParnew.Size[1]<=1.2:
-                    # check speed
-                    speed1=math.sqrt(ellip.mov[0]**2+ellip.mov[1]**2)
-                    speed2=math.sqrt(EllipParnew.mov[0]**2+EllipParnew.mov[1]**2)
-                    if speed2<10*speed1 or (speed1==0 or speed2==0):
+                    if  EllipParnew.Size[1]>=0 and EllipParnew.Size[0]>=0  :
+                    #if  EllipParnew.Size[1]!=0 and EllipParnew.Size[0]!=0  and (searchrect[0]+searchrect[2]*3/5.0)<EllipParnew.MidPos[0]<(searchrect[0]+searchrect[2]*4/5.0) and (searchrect[1]+searchrect[3]/3.0)<EllipParnew.MidPos[1]<(searchrect[1]+searchrect[3]/3.0*2.0):
                         found=1
                         EllipParnew.searchrect=searchrect
-                        break
-                
-                cont=cont.h_next()
-                if cont==None:
-                        morecont=False
+                        break            
+
             if found>=1:
-                #print 'add found %(listpos)d in frame %(framenum)d ' % vars()
+                #print 'add found %(listpos)d ' % vars()
                 elliplistnew.append(EllipParnew)            
             else:
                 ##dont try to rescue we are live
@@ -826,64 +720,40 @@ class ProcessPicThread(threading.Thread):
                         rectimage, searchrect=self.GetSearchCounturImage(image,rect)
                         if rectimage==None:
                             continue
-##                        pixout,pixin=self.InOutVal(rectimage)
-##                        if not (pixin>pixout+254 or pixin<pixout-254):
-##                            continue
+
                         if cv.CountNonZero(rectimage)<=10:
                             continue
                         
-                        cv.Rectangle(self.image,(searchrect[0],searchrect[1]),(int(searchrect[0]+searchrect[2]),int(searchrect[1]+searchrect[3])),cv.CV_RGB(0,255,0),1,8,0)
+                        
                         stor = cv.CreateMemStorage(0)
                         #print 'get contours %(listpos)d in frame %(framenum)d ' % vars()
-                        cont=cv.FindContours (rectimage, stor, mode=cv.CV_RETR_TREE,method=cv.CV_CHAIN_APPROX_TC89_KCOS)
-                        morecont=True
+                        cont=cv.FindContours (rectimage, stor, cv.CV_RETR_LIST,cv.CV_CHAIN_APPROX_TC89_KCOS,(0, 0))
                         found=0
-                        cont=cont.v_next()
-                        if cont==None:
-                            morecont=False
-                        while morecont:
-                            if( len(cont) < 6 or len(cont) >10000):
-                                #print 'low points'
-                                cont=cont.h_next()
-                                if cont==None:
-                                    morecont=False
-                                continue
-                            #print 'enought points'
-
-                            #test size of area
-
-                            #print cv.ContourArea(cont)
-                            #print rectimage.width*rectimage.height
-
-                            if cv.ContourArea(cont)<=(rectimage.width*rectimage.height/50)or cv.ContourArea(cont)>(rectimage.width*rectimage.height/2):
+                        for c in contour_iterator(cont):
+                            if len(c) >= 6:
+                                if cv.ContourArea(c)<=(rectimage.width*rectimage.height/50)or cv.ContourArea(c)>(rectimage.width*rectimage.height/2):
+                                    continue
                                 
-                                cont=cont.h_next()
-                                if cont==None:
-                                    morecont=False
-                                continue
-                            #print 'fit ellip %(listpos)d in frame %(framenum)d ' % vars()
-                            EllipParnew=self.FitEllipOnContour(cont)
+                                # Fits ellipse to current contour.
+                                EllipParnew=self.FitEllipOnContour(c)
 
-                            #define Number
-                            EllipParnew.Num=ellip.Num
-                            #korrekt pos and size to global
-                            EllipParnew.MidPos=EllipParnew.MidPos[0]/rectimage.width*searchrect[2]+searchrect[0],EllipParnew.MidPos[1]/rectimage.height*searchrect[3]+searchrect[1]
-                            EllipParnew.Size= EllipParnew.Size[0]/rectimage.width*searchrect[2]/2,EllipParnew.Size[1]/rectimage.height*searchrect[3]/2
+                                #define Number
+                                EllipParnew.Num=ellip.Num
+                                #korrekt pos and size to global
+                                EllipParnew.MidPos=EllipParnew.MidPos[0]/rectimage.width*searchrect[2]+searchrect[0],EllipParnew.MidPos[1]/rectimage.height*searchrect[3]+searchrect[1]
+                                EllipParnew.Size= EllipParnew.Size[0]/rectimage.width*searchrect[2]/2,EllipParnew.Size[1]/rectimage.height*searchrect[3]/2
 
+                                
+                                #EllipParnew.Angle=-EllipParnew.Angle
+                                EllipParnew.mov=EllipParnew.MidPos[0]-ellip.MidPos[0],EllipParnew.MidPos[1]-ellip.MidPos[1]
+
+
+                                if  EllipParnew.Size[1]<=1 and EllipParnew.Size[0]<=1 and (searchrect[0]+searchrect[2]*3/5.0)<EllipParnew.MidPos[0]<(searchrect[0]+searchrect[2]*4/5.0) and (searchrect[1]+searchrect[3]/3.0)<EllipParnew.MidPos[1]<(searchrect[1]+searchrect[3]/3.0*2.0):
+                                    cv.Rectangle(self.image,(searchrect[0],searchrect[1]),(int(searchrect[0]+searchrect[2]),int(searchrect[1]+searchrect[3])),cv.CV_RGB(0,255,0),1,8,0)
+                                    found=1
+                                    EllipParnew.searchrect=searchrect
+                                    break
                             
-                            #EllipParnew.Angle=-EllipParnew.Angle
-                            EllipParnew.mov=EllipParnew.MidPos[0]-ellip.MidPos[0],EllipParnew.MidPos[1]-ellip.MidPos[1]
-                            
-                            if  EllipParnew.Size[1]!=0 and EllipParnew.Size[0]!=0  and (searchrect[0]+searchrect[2]*3/5.0)<EllipParnew.MidPos[0]<(searchrect[0]+searchrect[2]*4/5.0) and (searchrect[1]+searchrect[3]/3.0)<EllipParnew.MidPos[1]<(searchrect[1]+searchrect[3]/3.0*2.0):
-                                found=1
-                                EllipParnew.searchrect=searchrect
-                                break
-
-
-                            
-                            cont=cont.h_next()
-                            if cont==None:
-                                    morecont=False
                         if found>=1:
                             #print 'add found %(listpos)d in frame %(framenum)d ' % vars()
                             elliplistnew.append(EllipParnew)
@@ -893,8 +763,6 @@ class ProcessPicThread(threading.Thread):
 
         #print 'copy list'             
         return elliplistnew
-
-    
     def GetEllipWithNum(self,liste,num):
         found=False
         for listpos, item in enumerate(liste):
@@ -924,12 +792,8 @@ class ProcessPicThread(threading.Thread):
             
     def FitEllipOnContour(self,contour):
         mat=cv.CreateMat(1,len(contour),cv.CV_32SC2)
-        i=0
-        for (x,y) in contour:
-            mat[0,i]=x,y
-            i+=1
-            if i>len(contour):
-                break
+        for (i, (x, y)) in enumerate(contour):
+                    mat[0, i] = (x, y)
         box = cv.FitEllipse2(mat)
         epar=config.EllipPar()
         epar.MidPos=box[0]
@@ -940,7 +804,6 @@ class ProcessPicThread(threading.Thread):
         #make searchrect bigger and move around
         rectlist=list()
         factors=range(1,5)
-
         bfactors=range(1,5)
 
         for factor in factors:
@@ -948,11 +811,6 @@ class ProcessPicThread(threading.Thread):
             teilen=8
             for bfactor in bfactors:
 
-##                if searchrect[2]<=searchrect[3]:
-##                    size=searchrect[2]
-##                else:
-##                    size=searchrect[3]
-                #radius=(size)/10.0*bfactor
                 radius=(searchrect[2]+searchrect[3])/20.0*bfactor
                 #radius=(math.sqrt(mov[0]**2+mov[1]**2))/5.0*bfactor
                 newb=int(searchrect[2]*(0.9+0.1*factor))
@@ -981,13 +839,17 @@ class ProcessPicThread(threading.Thread):
         else:
             b=2*ellip.Size[1]
             a=2*ellip.Size[0]
-        t=math.atan(-b*math.tan(angle)/a)
-        y=abs(a*math.cos(t)*math.cos(angle)-b*math.sin(t)*math.sin(angle))
-        t=math.atan(a*(1/math.tan(angle))/b)
-        x=abs(b*math.sin(t)*math.cos(angle)+a*math.cos(t)*math.sin(angle))
-
-        #print a,b, angle,  x,y 
-        return x,y
+        if angle==0:
+            x=a
+            y=b
+        else:
+            t=math.atan(-b*math.tan(angle)/a)
+            x=abs(a*math.cos(t)*math.cos(angle)-b*math.sin(t)*math.sin(angle))
+            t=math.atan(a*(1/math.tan(angle))/b)
+            y=abs(b*math.sin(t)*math.cos(angle)+a*math.cos(t)*math.sin(angle))
+        #print x,y, angle
+      
+        return y,x
 
     def GetSearchCounturImage(self,image,rect):
         #check subrect is in image
@@ -1013,12 +875,11 @@ class ProcessPicThread(threading.Thread):
             #cv.Smooth(temp,temp2,cv.CV_BILATERAL,3,3,175,175)
 
             cv.Resize(temp,thresimg,cv.CV_INTER_CUBIC)
-            
-            
+    
             #pixout,pixin=self.InOutVal(thresimg)
             #thres=int((pixin+pixout)/2)
-            
             #cv.Threshold(thresimg,thresimg,thres,255,cv.CV_THRESH_BINARY)
+            
             cv.Threshold(thresimg,thresimg,0,255,cv.CV_THRESH_OTSU)
 
             #print 'return subimage'
@@ -1028,11 +889,6 @@ class ProcessPicThread(threading.Thread):
         pixout=0
         pixin=0
         
-##        for i in range(img.width):
-##            pixout += img[0,i]+img[img.height-1,i]
-##        for i in range(img.height):
-##            pixout += img[i,0]+img[i,img.width-1]
-##        pixout=pixout/(img.width*2+img.height*2)
         pixout=(img[0,0]+img[0,1]+img[1,0]
                  +img[0,img.width-1]+img[1,img.width-1]+img[0,img.width-2]
                  +img[img.height-1,0]+img[img.height-2,0]+img[img.height-1,1]
@@ -1043,9 +899,6 @@ class ProcessPicThread(threading.Thread):
         pixin=img[int(img.height/2),int(img.width/2)]+img[int(img.height/2)+1,int(img.width/2)]+img[int(img.height/2),int(img.width/2)+1]+img[int(img.height/2)+1,int(img.width/2)+1]
         pixin=pixin/4
         return pixout,pixin
-
-       
-        #return pixout2,pixin2
     def NumEllip(self, elliplist):
         posiblenum=range(len(elliplist)+10)
         for listpos, item in enumerate(elliplist):
@@ -1105,16 +958,14 @@ class ProcessPicThread(threading.Thread):
 class BmpPaintThread(threading.Thread):
     """Background Worker Thread Class."""
 
-    def __init__(self, bmppaintqueue, num):
+    def __init__(self, parent,bmppaintqueue):
         """Init Worker Thread Class."""
         threading.Thread.__init__(self)
+        self.parent=parent
         self.bmppaintqueue=bmppaintqueue
-        #self.piclistqueue=piclistqueue
+        
 
         self.font=cv.InitFont(cv.CV_FONT_HERSHEY_DUPLEX,1,1,0,1,8)
-
-              
-        self.num=num
         self.ZoomImage=cv.CreateImage((100,100),8,3)
         self.ScaledImg=cv.CreateImage((100,100),8,3)
         
@@ -1127,112 +978,108 @@ class BmpPaintThread(threading.Thread):
         self.setDaemon(True)
         self.start()
         # start the thread
-
     def run(self):
-        #print "Aquirethread started "+str(self.num)
+        #print "Aquirethread started "
         while True:
-            pointerlist=self.bmppaintqueue.get()
-            #print "Aquirethread got task"+ " "+str(self.num)+" "+str(len(pointerlist))
+            self.timestamp,image, ellipses, connections, framecount=self.bmppaintqueue.get()
+            #print framecount
+            self.parent.SetStatusText('FPS: '+str(framecount),1)
+            #print "WinTrackBmphread got task"
+
+            #update WinTrack data
+            self.parent.imagetuple,  self.parent.elliplist, self.parent.connectlist, self.timestamp= image, ellipses, connections, self.timestamp
+
+            temp=cv.CreateImageHeader((image[1],image[2]), cv.IPL_DEPTH_8U, 3)
+            cv.SetData(temp, image[0])
+            image=temp
             
-            for item in pointerlist:
+            zoomrect=self.parent.zoomrect
+            zoomval=self.parent.zoomval
+            if zoomrect==None or zoomval==0:
+                zoomrect=(0,0,image.width,image.height)
+                self.parent.zoomrect=zoomrect
+            
+            dc=wx.ClientDC(self.parent.panel)
+            self.parent.panelwidth,self.parent.panelheight=dc.GetSize()
+            rightdown=self.parent.rightdown
 
-                image=item[0]
+            #change mask size if necessary and set it zero
+            if self.Mask.width!=image.width or self.Mask.height!=image.height:
+                self.Mask=cv.CreateImage((image.width,image.height),8,3)
+                self.Mask2=cv.CreateImage((image.width,image.height),8,1)
+            self.Overlay=cv.CloneImage(image)
+            cv.SetZero(self.Mask)
+            cv.SetZero(self.Mask2)
+
+            #draw all marks
+
+            #first ellipses
+
+            for listpos, item in enumerate(ellipses):
+                ellipPar=config.EllipPar()
+                ellipPar=ellipses[listpos]
+                #determine thickness of mark
+                thickness=(int((ellipPar.Size[0]+ellipPar.Size[1])/20))
                 
+                self.DrawEllipMark(self.Mask,ellipPar,0,0,255,thickness)
+
+            #second connections
+
+            for listpos, item in enumerate(connections):
                 
-                zoomrect=item[1]
-                dc=item[2]
-                rightdown=item[3]
-                ellipses=item[4]
-                connections=item[5]
-                #print rightdown
-
-                #change mask size if necessary and set it zero
-                if self.Mask.width!=image.width or self.Mask.height!=image.height:
-                    self.Mask=cv.CreateImage((image.width,image.height),8,3)
-                    self.Mask2=cv.CreateImage((image.width,image.height),8,1)
-                self.Overlay=cv.CloneImage(image)
-                cv.SetZero(self.Mask)
-                cv.SetZero(self.Mask2)
-
-                #draw all marks
-
-                #first ellipses
-
-                for listpos, item in enumerate(ellipses):
-                    ellipPar=config.EllipPar()
-                    ellipPar=ellipses[listpos]
-                    #determine thickness of mark
-                    thickness=(int((ellipPar.Size[0]+ellipPar.Size[1])/20))
-                    
-                    self.DrawEllipMark(self.Mask,ellipPar,0,0,255,thickness)
-
-                #second connections
-
-                for listpos, item in enumerate(connections):
-                    
-                    linepar=config.LinePar()
-                    linepar=connections[listpos]
-                    epar1=self.GetEllipWithNum(ellipses,linepar.Pt1)
-                    epar2=self.GetEllipWithNum(ellipses,linepar.Pt2)
-                    
-                    cv.Line(self.Mask,(int(epar1.MidPos[0]),int(epar1.MidPos[1])),(int(epar2.MidPos[0]),int(epar2.MidPos[1])),cv.CV_RGB(255,0,0),2,8,0)
-                                            
-                    rx,ry=abs(epar1.MidPos[0]-epar2.MidPos[0]),abs(epar1.MidPos[1]-epar2.MidPos[1])
-                    if epar1.MidPos[0]<epar2.MidPos[0]:
-                        posx=int(epar1.MidPos[0]+rx/2)
-                    else:
-                        posx=int(epar2.MidPos[0]+rx/2)
-                    if epar1.MidPos[1]<epar2.MidPos[1]:
-                        posy=int(epar1.MidPos[1]+ry/2)
-                    else:
-                        posy=int(epar2.MidPos[1]+ry/2)
-
-                    cv.PutText(self.Mask,'C%d'%linepar.Num,(posx,posy),self.font,cv.CV_RGB(255,0,0))
-                    
-
-                       
-                #connection in build
-                if rightdown[0]:
-                    cv.Line(self.Mask,rightdown[1],rightdown[2],cv.CV_RGB(0,255,0),2,8,0)
-
+                linepar=config.LinePar()
+                linepar=connections[listpos]
+                epar1=self.GetEllipWithNum(ellipses,linepar.Pt1)
+                epar2=self.GetEllipWithNum(ellipses,linepar.Pt2)
                 
-                    
-                
-                #overlay mask
-                cv.CvtColor(self.Mask,self.Mask2,cv.CV_RGB2GRAY)
-
-                alpha=10.0
-                cv.AddS(image,cv.Scalar(-125.0,-125.0,-125.0),self.Overlay,self.Mask2)
-                cv.Add(self.Overlay,self.Mask,self.Overlay)
-                
-                
-                panelwidth,panelheight=dc.GetSize()
-                if (panelwidth <=0) or (panelheight <=0):
-                    continue
-                if self.ScaledImg.width!=panelwidth or self.ScaledImg.height!=panelheight:
-                    self.ScaledImg=cv.CreateImage((panelwidth,panelheight),8,3)
-                #print "start"
-
-                #reset Zoom when image.size changed
-                if (zoomrect[0]+zoomrect[2])>self.Overlay.width or (zoomrect[1]+zoomrect[3])>self.Overlay.height:
-                    zoomrect=(0,0,self.Overlay.width ,self.Overlay.height)
-                if zoomrect[2]!=self.Overlay.width or zoomrect[3]!=self.Overlay.height:
-                    cv.SetImageROI(self.Overlay,zoomrect)
-                    if self.ZoomImage.width!=zoomrect[2] or self.ZoomImage.height!=zoomrect[3]:
-                        self.ZoomImage=cv.CreateImage((zoomrect[2],zoomrect[3]),8,3)
-                    cv.Copy(self.Overlay,self.ZoomImage)
-                    cv.ResetImageROI(self.Overlay)
-                    cv.Resize(self.ZoomImage,self.ScaledImg,cv.CV_INTER_NN)
+                cv.Line(self.Mask,(int(epar1.MidPos[0]),int(epar1.MidPos[1])),(int(epar2.MidPos[0]),int(epar2.MidPos[1])),cv.CV_RGB(255,0,0),2,8,0)
+                                        
+                rx,ry=abs(epar1.MidPos[0]-epar2.MidPos[0]),abs(epar1.MidPos[1]-epar2.MidPos[1])
+                if epar1.MidPos[0]<epar2.MidPos[0]:
+                    posx=int(epar1.MidPos[0]+rx/2)
                 else:
-                    cv.Resize(self.Overlay,self.ScaledImg,cv.CV_INTER_NN)
-                
-                #print "next bitmap"
-                #print clock()
-                
-                self.bitmap=wx.BitmapFromBuffer(panelwidth,panelheight,self.ScaledImg.tostring()) 
-                dc.DrawBitmap(self.bitmap, 0, 0, False)
-                #print "finish"
-                #print clock()
+                    posx=int(epar2.MidPos[0]+rx/2)
+                if epar1.MidPos[1]<epar2.MidPos[1]:
+                    posy=int(epar1.MidPos[1]+ry/2)
+                else:
+                    posy=int(epar2.MidPos[1]+ry/2)
+
+                cv.PutText(self.Mask,'C%d'%linepar.Num,(posx,posy),self.font,cv.CV_RGB(255,0,0))
+  
+            #connection in build
+            if rightdown[0]:
+                cv.Line(self.Mask,rightdown[1],rightdown[2],cv.CV_RGB(0,255,0),2,8,0)
+
+            #overlay mask
+            cv.CvtColor(self.Mask,self.Mask2,cv.CV_RGB2GRAY)
+
+            alpha=10.0
+            cv.AddS(image,cv.Scalar(-125.0,-125.0,-125.0),self.Overlay,self.Mask2)
+            cv.Add(self.Overlay,self.Mask,self.Overlay)
+            
+            
+            panelwidth,panelheight=dc.GetSize()
+            if (panelwidth <=0) or (panelheight <=0):
+                continue
+            if self.ScaledImg.width!=panelwidth or self.ScaledImg.height!=panelheight:
+                self.ScaledImg=cv.CreateImage((panelwidth,panelheight),8,3)
+
+            #reset Zoom when image.size changed
+            
+            if (zoomrect[0]+zoomrect[2])>self.Overlay.width or (zoomrect[1]+zoomrect[3])>self.Overlay.height:
+                zoomrect=(0,0,self.Overlay.width ,self.Overlay.height)
+            if zoomrect[2]!=self.Overlay.width or zoomrect[3]!=self.Overlay.height:
+                cv.SetImageROI(self.Overlay,zoomrect)
+                if self.ZoomImage.width!=zoomrect[2] or self.ZoomImage.height!=zoomrect[3]:
+                    self.ZoomImage=cv.CreateImage((zoomrect[2],zoomrect[3]),8,3)
+                cv.Copy(self.Overlay,self.ZoomImage)
+                cv.ResetImageROI(self.Overlay)
+                cv.Resize(self.ZoomImage,self.ScaledImg,cv.CV_INTER_NN)
+            else:
+                cv.Resize(self.Overlay,self.ScaledImg,cv.CV_INTER_NN)
+
+            self.bitmap=wx.BitmapFromBuffer(panelwidth,panelheight,self.ScaledImg.tostring()) 
+            dc.DrawBitmap(self.bitmap, 0, 0, False)
                 
         self.bmppaintqueue.task_done()
         
@@ -1244,32 +1091,25 @@ class BmpPaintThread(threading.Thread):
         else:
             b=2*ellip.Size[1]
             a=2*ellip.Size[0]
-        t=math.atan(-b*math.tan(angle)/a)
-        x=abs(a*math.cos(t)*math.cos(angle)-b*math.sin(t)*math.sin(angle))
-        t=math.atan(a*(1/math.tan(angle))/b)
-        y=abs(b*math.sin(t)*math.cos(angle)+a*math.cos(t)*math.sin(angle))
+        if angle==0:
+            x=a
+            y=b
+        else:
+            t=math.atan(-b*math.tan(angle)/a)
+            x=abs(a*math.cos(t)*math.cos(angle)-b*math.sin(t)*math.sin(angle))
+            t=math.atan(a*(1/math.tan(angle))/b)
+            y=abs(b*math.sin(t)*math.cos(angle)+a*math.cos(t)*math.sin(angle))
+        #print x,y, angle
         return y,x
             
     def DrawEllipMark(self,image,epar,color1,color2,color3,thickness):
         b,h=self.GetAABBEllip(epar)
-        #b,h=b+20,h+20
-##        b,h=int(b+b/2),int(h+h/2)
-##        if b<20 or h<20:
-##            aspect=float(b)/float(h)
-##            if aspect<1:
-##                b=20
-##                h=int(b/aspect)
-##            else:
-##                h=20
-##                b=int(h*aspect)
-        b,h=int(b*1.3),int(h*1.3)
+        b,h=int(b*1.5),int(h*1.5)
         if b<20:
             b=20
         if h<20:
             h=20
-        #b,h=int(b+10),int(h+10)
-        
-        #b,h=b+5,h+5
+
         posx=int(epar.MidPos[0]-b/2)
         posy=int(epar.MidPos[1]-h/2)
         cv.Rectangle(image,(posx,posy),(int(posx+b),int(posy+h)),cv.CV_RGB(color1,color2,color3),thickness,8,0)
@@ -1281,8 +1121,6 @@ class BmpPaintThread(threading.Thread):
         cv.PutText(image,'%d'%epar.Num,(int(posx+b),int(posy+h)),self.font,cv.CV_RGB(color1,color2,color3))
 
         #add movement vectors
-
-        #cv.Line(image,(int(epar.MidPos[0]-epar.mov[0]),int(epar.MidPos[1]-epar.mov[1])),(int(epar.MidPos[0]),int(epar.MidPos[1])),cv.CV_RGB(color1,255,color3),thickness,8,0)
 
         if epar.mov[0]!=0 and epar.mov[1]!=0:
 
@@ -1296,22 +1134,16 @@ class BmpPaintThread(threading.Thread):
 
             #enlongen vector
 
-            P2=P1[0]-3*lenght*math.cos(angle),P1[1]-3*lenght*math.sin(angle)
+            P2=P1[0]-10*lenght*math.cos(angle),P1[1]-10*lenght*math.sin(angle)
             P5=P1[0]-thickness*math.cos(angle),P1[1]-thickness*math.sin(angle)
 
             #draw main line
 
             cv.Line(image,(int(P5[0]),int(P5[1])),(int(P2[0]),int(P2[1])),cv.CV_RGB(color1,255,color3),thickness,8,0)
 
-            P3=P1[0]-9*math.cos(angle+math.pi/4),P1[1]-9*math.sin(angle+math.pi/4)
-            #cv.Line(image,(int(P1[0]),int(P1[1])),(int(P2[0]),int(P2[1])),cv.CV_RGB(color1,255,color3),3,8,0)
-            
+            P3=P1[0]-9*math.cos(angle+math.pi/4),P1[1]-9*math.sin(angle+math.pi/4)  
             P4=P1[0]-9*math.cos(angle-math.pi/4),P1[1]-9*math.sin(angle-math.pi/4)
-            #cv.Line(image,(int(P1[0]),int(P1[1])),(int(P2[0]),int(P2[1])),cv.CV_RGB(color1,255,color3),3,8,0)
-
-
-
-       
+  
             #print angle,lenght
         
             cv.FillPoly(image,
@@ -1320,8 +1152,7 @@ class BmpPaintThread(threading.Thread):
                          (int(P4[0]),int(P4[1]))]],
                         cv.CV_RGB(color1,255,color3),
                         8,0)
-
-                        
+      
     def GetEllipWithNum(self,liste,num):
         found=False
         for listpos, item in enumerate(liste):
@@ -1339,4 +1170,4 @@ class CalibData:
     def __init__(self):
         self.intrinsic=None
         self.distortion=None
-        #cv.Set(self.recti,1)
+

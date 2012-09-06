@@ -2,18 +2,17 @@
 import wx,cv,ctypes,os
 import threading
 import Queue
+import VideoCapture
+import ImageChops
+
+import multiprocessing
+
 
 from time import clock
 from time import sleep
 
-#submodule activex wrapper avt camera driver activex element
-import AVTCam
-
 #import globals
 import config
-
-
-
 
 
 class LiveCamWin(wx.Frame):
@@ -24,204 +23,193 @@ class LiveCamWin(wx.Frame):
         self.status.SetFieldsCount(2)
         self.status.SetStatusWidths([-1,65])
 
-        
-
         wx.EVT_CLOSE(self, self.OnClose)
-
-        
-
-        
 
         #startwerte
         self.caminterface=None
         self.isfileinterface=False
         self.datatoqueue=list()
-##        self.rawimage = cv.CreateImage((100,100),8,3)
-##        self.image = cv.CreateImage((100,100),8,3)
-##        cv.Set(self.rawimage,0)
-##        cv.Set(self.image,0)
 
-        
         self.lasttime=0
         self.acttime=0
         self.framecount=0
-        
 
         self.childs=list()
 
-        #spwan queue
-        self.aquirequeue=Queue.PriorityQueue(-1)
-        self.piclistqueue=Queue.PriorityQueue(-1)
-        #spawn pool of threads
-        for i in range(1):
-            t=QueuePicThread(self.aquirequeue, i)
 
-        #if False:
-        if self.InitAVTCamera():
-            self.SetStatusText('AVT Interface initiated ')
+        if self.InitVidCapCamera():
+            self.SetStatusText('VidCap Interface initiated ')
         else:
-            self.SetStatusText('No AVT Camera found')
-            
-            
             if self.InitOpenCVCamera():
                 self.SetStatusText('OpenCV Interface initiated ')
             else:
                 if self.InitFileInterface():
                     self.isfileinterface=True
                     self.SetStatusText('File Interface initiated ')
-                
-                
-            
-        
-        self.Show()
-        
-    def InitAVTCamera(self):
-        #print CamObj._get_Camera()
-        if not isinstance(self.caminterface,AVTCam.AVTCam):
-            try:
-                self.caminterface=AVTCam.AVTCam(self,wx.ID_ANY,wx.DefaultPosition,wx.DefaultSize,0,'AVT')
-                self.SetStatusText('AVT Interface&Driver found')
-                
-                
-            except wx.PyAssertionError:
-                #have to destroy useless activex window
-                print self.GetChildren()
-                for item in self.GetChildren():
-                    if isinstance(item,wx.activex.ActiveXWindow):
-                        item.Destroy()
-                return False
 
-        self.caminterface._set_Camera(0)
-        if self.caminterface._get_Camera()<0:
-                print 'closing'
-                self.SetStatusText('Camera Initilization failed or unplugged')
-                self.caminterface.Close()
-                self.caminterface.Destroy()
-                return False
+        self.Show()
+    def InitVidCapCamera(self):
+        #DirectShowDevice
+        try:
+            self.caminterface = VideoCapture.Device(0)
+        except:
+            return False
+        self.aquirequeue=Queue.Queue(3)
+        self.totrackqueue=multiprocessing.Queue(1)
+        self.bmppaintqueue=Queue.LifoQueue(1)
+
+        t=VidCapQueuePicThread(self.aquirequeue,self.bmppaintqueue)
 
         ID_CPROP=wx.NewId()
-        
+      
         Menubar =wx.MenuBar()
         Config = wx.Menu()
         Menubar.Append(Config,'&Config')
         Config.Append(ID_CPROP,'&Properties','Camera Properties')
         self.SetMenuBar(Menubar)
+        self.Bind(wx.EVT_MENU, self.VidCapProperties, id=ID_CPROP)
         
-        self.Bind(AVTCam.EVT_CameraUnplugged, self.CamPlugUnplug)
-        self.Bind(AVTCam.EVT_CameraPlugged, self.CamPlugUnplug)
-        self.Bind(wx.EVT_MENU, self.CameraProperties, id=ID_CPROP)
+        t=BmpPaintThread(self.bmppaintqueue)
+            
 
-        self.Bind(AVTCam.EVT_FrameAcquired, self.GrabAVT)
-
-        #self.panel=wx.Panel(self, wx.ID_ANY, style=wx.BORDER_SUNKEN)
-        #self.panelsizer=wx.BoxSizer(wx.HORIZONTAL)
-        #self.SetSizer(self.panelsizer)
+        self.ScaledImg=cv.CreateImage((100,100),8,3)
         
-        
-        self.aquire=self.caminterface._get_Acquire()
-        self.caminterface._set_Acquire(False)
-        self.caminterface._set_Mode(4)
-        self.caminterface._set_GainControl(1)
-        self.caminterface._set_Magnification(0)
-        self.caminterface._set_ShutterControl(1)
-        self.caminterface._set_Palette(0)
-        self.caminterface._set_Acquire(True)
-        return True
-    def CameraProperties(self,event):
-        self.caminterface.ShowProperties(True,1)
-     
-    def CamPlugUnplug(self,event):
-        self.InitAVTCamera()
-    def GrabAVT(self,event):
-        width=self.caminterface._get_SizeX()
-        height=self.caminterface._get_SizeY()
-        intrawdatapointer=self.caminterface.GetRawData(True)
-
-        winsize=self.GetSize()
-        self.acttime=clock()
-        if self.acttime-self.lasttime<1:
-            self.framecount+=1
-        else:
-            self.SetStatusText('FPS: '+str(self.framecount),1)
-            self.framecount=1
-            self.lasttime=self.acttime
-
-        #print len(self.childs)
-        if len(self.childs)>=1:
-            self.datatoqueue.append((self.acttime, intrawdatapointer,width,height,self.childs))
-        
-
-        
-        if len(self.datatoqueue)>=3:
-            self.aquirequeue.put(self.datatoqueue,False)
-            self.datatoqueue=list()
-            #self.parent.queue.join()
-
-        #print "Put to pic list to queue!"
-        #print threading.activeCount()
-    def InitOpenCVCamera(self):
-        self.caminterface=cv.CreateCameraCapture(0)
-        
-        self.image=cv.QueryFrame( self.caminterface)
-        if self.image==None:
-            self.SetStatusText('OpenCVCamera Initilization failed')
-            return False
-
-        self.ID_FTIMER=wx.NewId()
-        self.Timer=wx.Timer(self, self.ID_FTIMER)
-        self.Timer.Start(30)
-        self.Bind(wx.EVT_TIMER,self.GrabOpenCV,id=self.ID_FTIMER)
-
-        Menubar =wx.MenuBar()
-        Config = wx.Menu()
-        Menubar.Append(Config,'&Config')
-        #Config.Append(ID_CPROP,'&Properties','Camera Properties')
-        self.SetMenuBar(Menubar)
-
-        #spwan queue
-        self.bmppaintqueue=Queue.PriorityQueue(-1)
-
-        #spawn pool of threads
-        for i in range(1):
-            t=BmpPaintThread(self.bmppaintqueue,i)
-
         self.panel=wx.Panel(self, wx.ID_ANY, style=wx.BORDER_SUNKEN)
         self.panelsizer=wx.BoxSizer(wx.HORIZONTAL)
         self.panelsizer.Add(self.panel,2,wx.EXPAND)
         self.SetSizer(self.panelsizer)
 
-        self.ScaledImg=cv.CreateImage((100,100),8,3)
-
-        return True
-
         
+        #print 'start aquiring'
+        self.aquirequeue.put((self,self.caminterface),False)
+        return True
+        
+    def VidCapProperties(self,event):
+        #stop aquiring
+        self.aquirequeue.put((self,None,list()),False)
+        self.caminterface.displayCaptureFilterProperties()
+        #start again
+        self.aquirequeue.put((self,self.caminterface),False)
+        
+    def InitOpenCVCamera(self):
+        # is broken
+        pass
+
+##        self.CamInterface=cv.CreateCameraCapture(0)
+##		
+##        width = 800 #leave None for auto-detection
+##        height = 600 #leave None for auto-detection
+##
+##        if width is None:
+##                width = int(cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FRAME_WIDTH))
+##        else:
+##                cv.SetCaptureProperty(self.CamInterface,cv.CV_CAP_PROP_FRAME_WIDTH,width)    
+##
+##        if height is None:
+##                height = int(cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FRAME_HEIGHT))
+##        else:
+##                cv.SetCaptureProperty(self.CamInterface,cv.CV_CAP_PROP_FRAME_HEIGHT,height) 
+##        #cv.SetCaptureProperty(self.CamInterface,cv.CV_CAP_PROP_FPS,30)
+##        #cv.GetCaptureProperty(self.CamInterface,cv.CV_CAP_PROP_MODE)
+##
+##        #print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FRAME_WIDTH)
+##        #print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FRAME_HEIGHT)
+##        #print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FORMAT)
+##        #print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FPS)
+##        #print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FRAME_COUNT)
+##        #print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_MODE)
+##        #print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_GAIN)
+##
+##        ID_CPROP=wx.NewId()
+##        
+##        Menubar =wx.MenuBar()
+##        Config = wx.Menu()
+##        Menubar.Append(Config,'&Config')
+##        Config.Append(ID_CPROP,'&Properties','Camera Properties')
+##        self.SetMenuBar(Menubar)
+##        self.Bind(wx.EVT_MENU, self.OpenCVCamProp, id=ID_CPROP)
+##        
+##        print width,height
+##
+##        self.image=cv.QueryFrame( self.CamInterface)
+##        if self.image==None:
+##            self.SetStatusText('OpenCVCamera Initilization failed')
+##            return False
+##
+##        self.aquirequeue=Queue.PriorityQueue(-1)
+##        for i in range(1):
+##           t=QueuePicThread(self.aquirequeue, i)
+##        
+##
+##
+##        self.ID_FTIMER=wx.NewId()
+##        self.Timer=wx.Timer(self, self.ID_FTIMER)
+##        self.Timer.Start(int(cv.GetCaptureProperty(self.CamInterface,cv.CV_CAP_PROP_FPS)))
+##        self.Bind(wx.EVT_TIMER,self.GrabOpenCV,id=self.ID_FTIMER)
+##
+##        
+##        #spwan queue
+##        self.bmppaintqueue=Queue.LifoQueue(1)
+##
+##        #spawn pool of threads
+##        for i in range(1):
+##            t=BmpPaintThread(self.bmppaintqueue,i)
+##
+##        self.panel=wx.Panel(self, wx.ID_ANY, style=wx.BORDER_SUNKEN)
+##        self.panelsizer=wx.BoxSizer(wx.HORIZONTAL)
+##        self.panelsizer.Add(self.panel,2,wx.EXPAND)
+##        self.SetSizer(self.panelsizer)
+##
+##        self.ScaledImg=cv.CreateImage((100,100),8,3)
+##
+##        return True
+
+    def OpenCVCamProp(self,event):
+        # is broken
+        pass
+        
+##        print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FRAME_WIDTH)
+##        print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FRAME_HEIGHT)
+##        print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FORMAT)
+##        print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FPS)
+##        print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FRAME_COUNT)
+##        print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_MODE)
+##        print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_GAIN)
 
 
     def GrabOpenCV(self,event):
-        try:
-            self.image=cv.QueryFrame( self.CamInterface )
-            self.acttime=clock()
-            if self.acttime-self.lasttime<1:
-                self.framecount+=1
-            else:
-                self.SetStatusText('FPS: '+str(self.framecount),1)
-                self.framecount=1
-                self.lasttime=self.acttime
-            if len(self.childs)>=1:
-                self.datatoqueue.append((self.acttime, self.image,self.image.width,self.image.height,self.childs))
-            if len(self.datatoqueue)>=3:
-                self.aquirequeue.put(self.datatoqueue,False)
-                self.datatoqueue=list()
-
-            gc=wx.ClientDC(self.imagepanel)
-            self.panelwidth,self.panelheight=gc.GetSize()
-            datatoqueue=list()
-            datatoqueue.append((self.image, gc))
-            self.bmppaintqueue.put(datatoqueue,False)
-            
-        except:
-            return
+        # is broken
+        pass
+##        self.image=cv.QueryFrame( self.CamInterface )
+##        self.acttime=clock()
+##        if self.acttime-self.lasttime<1:
+##            self.framecount+=1
+##        else:
+##            self.SetStatusText('FPS: '+str(self.framecount),1)
+##            self.framecount=1
+##            self.lasttime=self.acttime
+##        if len(self.childs)>=1:
+##            self.datatoqueue.append((self.acttime, self.image,self.image.width,self.image.height,self.childs))
+##        if len(self.datatoqueue)>=1:
+##            self.aquirequeue.put(self.datatoqueue,False)
+##            self.datatoqueue=list()
+##
+##        gc=wx.ClientDC(self.panel)
+##        self.panelwidth,self.panelheight=gc.GetSize()
+##        datatoqueue=list()
+##        datatoqueue.append((self.image, gc))
+##        try:
+##            self.bmppaintqueue.put(datatoqueue,False)
+##        except:
+##            pass
+        
     def InitFileInterface(self):
+
+        self.aquirequeue=Queue.PriorityQueue(-1)
+        self.totrackqueue=multiprocessing.Queue(3)
+        self.bmppaintqueue=Queue.PriorityQueue(-1)
+
+        t=QueuePicThread(self.aquirequeue)
 
         ID_LSERIES=wx.NewId()
         ID_LFOLDER=wx.NewId()
@@ -229,12 +217,7 @@ class LiveCamWin(wx.Frame):
         self.dirname=config.ProgDir
         self.ScaledImg=cv.CreateImage((100,100),8,3)
 
-        #spwan queue
-        self.bmppaintqueue=Queue.PriorityQueue(-1)
-
-        #spawn pool of threads
-        for i in range(1):
-            t=BmpPaintThread(self.bmppaintqueue,i)
+        t=BmpPaintThread(self.bmppaintqueue)
 
         Menubar =wx.MenuBar()
         Operate = wx.Menu()
@@ -246,7 +229,7 @@ class LiveCamWin(wx.Frame):
         
         self.ID_FTIMER=wx.NewId()
         self.Timer=wx.Timer(self, self.ID_FTIMER)
-        self.Timer.Start(30)
+        self.Timer.Start(0.01)
         self.Bind(wx.EVT_TIMER,self.GotoNextFile,id=self.ID_FTIMER)
 
         self.Bind(wx.EVT_MENU, self.LoadSeries, id=ID_LSERIES)
@@ -262,11 +245,11 @@ class LiveCamWin(wx.Frame):
         self.slidersizer=wx.BoxSizer(wx.VERTICAL)
         self.slidersizer.Add(self.imageslider,0,wx.EXPAND)
         self.sliderpanel.SetSizer(self.slidersizer)
-        self.imagepanel=wx.Panel(self, wx.ID_ANY, style=wx.NO_BORDER)
+        self.panel=wx.Panel(self, wx.ID_ANY, style=wx.NO_BORDER)
         
         self.panelsizer=wx.BoxSizer(wx.VERTICAL)
         self.panelsizer.Add(self.sliderpanel,0,wx.EXPAND)
-        self.panelsizer.Add(self.imagepanel,2,wx.EXPAND)
+        self.panelsizer.Add(self.panel,2,wx.EXPAND)
 
         self.SetSizer(self.panelsizer)
 
@@ -326,20 +309,10 @@ class LiveCamWin(wx.Frame):
         self.image = cv.LoadImage(self.dirname+'\\'+self.filenames[picnum-1])
 
         self.acttime=clock()
-        if len(self.childs)>=1:
-            
-            self.datatoqueue.append((self.imageslider.GetValue(), self.image,self.image.width,self.image.height,self.childs))
-            
-        if len(self.datatoqueue)>=1:
-            self.aquirequeue.put(self.datatoqueue,False)
-            self.datatoqueue=list()
-            #print picnum
 
-        gc=wx.ClientDC(self.imagepanel)
-        self.panelwidth,self.panelheight=gc.GetSize()
-        datatoqueue=list()
-        datatoqueue.append((self.image, gc))
-        self.bmppaintqueue.put(datatoqueue,False)
+
+        self.aquirequeue.put((self,self.imageslider.GetValue(), self.image, self.image.width, self.image.height),False)
+
     def GotoNextFile(self,event):
         if self.gothrough:
             if self.imageslider.GetValue()<self.imageslider.GetMax():
@@ -355,7 +328,13 @@ class LiveCamWin(wx.Frame):
         self.gothrough=True
 
     def OnClose(self, event):
-        #self.caminterface._set_Acquire(False)
+        self.aquirequeue.put((self,None,list()),False)
+        sleep(0.3)
+        try:
+            del self.caminterface
+        except:
+            print 'cant close cam interface'
+            pass
         for item in self.childs:
             item.OnClose(True)
         self.Destroy()
@@ -363,12 +342,71 @@ class LiveCamWin(wx.Frame):
 class QueuePicThread(threading.Thread):
     """Background Worker Thread Class."""
 
-    def __init__(self, aquirequeue, num):
+    def __init__(self, aquirequeue):
         """Init Worker Thread Class."""
         threading.Thread.__init__(self)
         self.aquirequeue=aquirequeue
-        #self.piclistqueue=piclistqueue
+        self.setDaemon(True)
+        self.start()
+        # start the thread
+
+    def run(self):
+        #print "Aquirethread started "
+        while True:
+            (parent,self.timestamp, rawdatapointer ,width, height)=self.aquirequeue.get()
+            #print "Aquirethread got task"
+            
+            if isinstance(rawdatapointer,cv.iplimage):
+                self.raw=cv.CreateImage((rawdatapointer.width,rawdatapointer.height),cv.IPL_DEPTH_8U,1)
+                cv.CvtColor(rawdatapointer,self.raw,cv.CV_RGB2GRAY)
+
+                gc=wx.ClientDC(parent.panel)
+                try:
+                    parent.bmppaintqueue.put((rawdatapointer, gc),False)
+                except Queue.Full:
+                    print 'winCam1 bmppaintqueue is full'
+            else:
+                
+                #print rawdatapointer, width, height
+                try:
+                    self.memstring=ctypes.string_at(rawdatapointer,width*height)
+                except:
+                    break
+
+                # is avt-camera like input
+                self.raw= cv.CreateImageHeader((width,height),cv.IPL_DEPTH_8U, 1)
+                cv.SetData(self.raw, self.memstring,width)
+
+                gc=wx.ClientDC(parent.panel)
+                try:
+                    parent.bmppaintqueue.put((self.raw, gc),False)
+                except Queue.Full:
+                    print 'winCam2 bmppaintqueue is full'
+
+            try:
+                parent.totrackqueue.put((self.timestamp,(self.raw.tostring(),self.raw.width,self.raw.height)),False)
+            except Queue.Full:
+                print 'totrackqueue is full'
+
+                    
+            self.aquirequeue.task_done()
+class VidCapQueuePicThread(threading.Thread):
+    """Background Worker Thread Class."""
+
+    def __init__(self, aquirequeue, bmppaintqueue, num=0):
+        """Init Worker Thread Class."""
+        threading.Thread.__init__(self)
+        self.aquirequeue=aquirequeue
+        self.bmppaintqueue=bmppaintqueue
         self.num=num
+        self.caminterface=None
+        self.lasthash=0
+        self.oldhistmax=0.0
+        
+
+        self.lasttime=0
+        self.framecount=0
+        
         self.setDaemon(True)
         self.start()
         # start the thread
@@ -378,60 +416,54 @@ class QueuePicThread(threading.Thread):
     def run(self):
         #print "Aquirethread started "+str(self.num)
         while True:
-            pointerlist=self.aquirequeue.get()
-            #print "Aquirethread got task"+ " "+str(self.num)+" "+str(len(pointerlist))
-            
+            if not self.aquirequeue.empty():
+                (parent,self.caminterface) =self.aquirequeue.get()
+            if self.caminterface is not None:
+                rawdata=self.caminterface.getBuffer()  #datastring, width, height
+                newhash=hash(rawdata)
+                if newhash!=self.lasthash:
+                    self.lasthash=newhash
+                    self.timestamp=clock()
 
-            for item in pointerlist:
-
-                self.timestamp=item[0]
-                rawdatapointer=item[1]
-                width=item[2]
-                height=item[3]
-                trackers=item[4]
-                
-
-                if isinstance(rawdatapointer,cv.iplimage):
-                    self.raw=cv.CreateImage((rawdatapointer.width,rawdatapointer.height),cv.IPL_DEPTH_8U,1)
-                    cv.CvtColor(rawdatapointer,self.raw,cv.CV_RGB2GRAY)
-                else:
                     
-                    #print rawdatapointer, width, height
+
+                    
+                    if self.timestamp-self.lasttime<1:
+                        self.framecount+=1
+                    else:
+                        parent.SetStatusText('FPS: '+str(self.framecount),1)
+                        self.framecount=1
+                        self.lasttime=self.timestamp
+                        
+                    temp=cv.CreateImageHeader((rawdata[1],rawdata[2]), cv.IPL_DEPTH_8U, 3)
+                    cv.SetData(temp, rawdata[0])
+
+                    self.raw=cv.CreateImage((rawdata[1],rawdata[2]),cv.IPL_DEPTH_8U,1)
+                    cv.CvtColor(temp,self.raw,cv.CV_RGB2GRAY)
+
                     try:
-                        self.memstring=ctypes.string_at(rawdatapointer,width*height)
-                    except:
-                        break
+                        #parent.totrackqueue.put((self.timestamp,self.raw),False)
+                        parent.totrackqueue.put((self.timestamp,(self.raw.tostring(),self.raw.width,self.raw.height)),False)
+                    except Queue.Full:
+                        print 'totrackqueue is full'
 
-                    # is avt-camera like input
-
-                    #self.raw= cv.CreateImageHeader((width,height),cv.IPL_DEPTH_8U, 1)
-                    self.raw= cv.CreateImageHeader((width,height),cv.IPL_DEPTH_8U, 1)
+                    gc=wx.ClientDC(parent.panel)
+                    try:
+                        self.bmppaintqueue.put((temp, gc),False)
+                    except Queue.Full:
+                        print 'winCam bmppaintqueue3 is full'
                     
-                    #self.raw=cv.CreateImage((width,height),cv.IPL_DEPTH_8U,1)
-                    cv.SetData(self.raw, self.memstring,width)
-
-                    
-                    
-
-                #print len(trackers)
+                #sleep(0.005)
                 
-                for window in trackers:
-                    #print window
-                    wx.PostEvent(window, config.ResultEvent("Pic to Queue!",(self.timestamp,self.raw)))
-                    
-            self.aquirequeue.task_done()
 
 class BmpPaintThread(threading.Thread):
     """Background Worker Thread Class."""
 
-    def __init__(self, bmppaintqueue, num):
+    def __init__(self, bmppaintqueue):
         """Init Worker Thread Class."""
         threading.Thread.__init__(self)
         self.bmppaintqueue=bmppaintqueue
-        #self.piclistqueue=piclistqueue
-
-              
-        self.num=num
+ 
 
         self.ScaledImg=cv.CreateImage((100,100),8,3)
         self.setDaemon(True)
@@ -439,31 +471,21 @@ class BmpPaintThread(threading.Thread):
         # start the thread
 
     def run(self):
-        #print "Aquirethread started "+str(self.num)
         while True:
-            pointerlist=self.bmppaintqueue.get()
-            #print "Aquirethread got task"+ " "+str(self.num)+" "+str(len(pointerlist))
+            (image, dc)=self.bmppaintqueue.get()
+            #print "Bmpthread got task"
+            panelwidth,panelheight=dc.GetSize()
+            if (panelwidth <=0) or (panelheight <=0):
+                continue
+            if self.ScaledImg.width!=panelwidth or self.ScaledImg.height!=panelheight:
+                self.ScaledImg=cv.CreateImage((panelwidth,panelheight),8,3)
+            #print "start"
+            cv.Resize(image,self.ScaledImg,cv.CV_INTER_NN)
+            
+            cv.CvtColor(self.ScaledImg,self.ScaledImg,cv.CV_RGB2BGR)
+            self.bitmap=wx.BitmapFromBuffer(panelwidth,panelheight,self.ScaledImg.tostring()) 
+            dc.DrawBitmap(self.bitmap, 0, 0, False)
 
-            for item in pointerlist:
-
-                image=item[0]
-                dc=item[1]
-
-                
-                panelwidth,panelheight=dc.GetSize()
-                if (panelwidth <=0) or (panelheight <=0):
-                    continue
-                if self.ScaledImg.width!=panelwidth or self.ScaledImg.height!=panelheight:
-                    self.ScaledImg=cv.CreateImage((panelwidth,panelheight),8,3)
-                #print "start"
-
-                cv.Resize(image,self.ScaledImg,cv.CV_INTER_NN)
-                
-               
-                self.bitmap=wx.BitmapFromBuffer(panelwidth,panelheight,self.ScaledImg.tostring()) 
-                dc.DrawBitmap(self.bitmap, 0, 0, False)
-                #print "finish"
-                #print clock()
-                
                     
             self.bmppaintqueue.task_done()
+

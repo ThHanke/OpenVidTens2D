@@ -21,10 +21,15 @@ setup(data_files = [('', ['calicon.png',
                           'Startupsmall.png',
                           'Stopupsmall.png',
                           'Stopdownsmall.png',
+                          'C:\Python27\Lib\helvetica-10.pil',
+                          'C:\Python27\Lib\helvB08.pil',
+                          'C:\Python27\Lib\helvetica-10.png',
+                          'C:\Python27\Lib\helvB08.png',
+                          
                                                 
                           ])],
 
-      options = {"py2exe": {"compressed": 0,"optimize": 2,
+      options = {"py2exe": {"compressed": 0,"optimize": 0,
                             "includes": includes,
                             "excludes": excludes,
                             "packages": packages,

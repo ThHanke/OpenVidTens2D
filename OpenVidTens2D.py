@@ -3,8 +3,7 @@ import wx,cv
 
 from time import clock
 from time import sleep
-#import ctypes
-#import math
+
 
 
 #globals
@@ -75,6 +74,6 @@ class App(wx.App):
 
 if __name__=="__main__":
     
-    app = App(redirect=False)
-    #app = App(redirect=1)
+    #app = App(redirect=False)
+    app = App(redirect=0)
     app.MainLoop()
