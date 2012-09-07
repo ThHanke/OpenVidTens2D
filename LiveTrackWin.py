@@ -204,40 +204,50 @@ class LiveTrackWin(wx.Frame):
         #cv.ResizeWindow('Calibration',screen[2]-int(screen[2]/3*2)-12,int((screen[2]-int(screen[2]/3*2))*self.image.height/self.image.width))
 
         while needcalibpic:
-            wx.MessageBox('Put Chessboard Pattern ( %dx%d) into %d. Position' %(board_w,board_h,detectsuccsess+1), 'Calibration Procedure',style=wx.OK|wx.ICON_EXCLAMATION)
-            raw = cv.CreateImage((self.image.width,self.image.height),8,1)
-            cv.CvtColor(self.image,raw,cv.CV_RGB2GRAY)
-            paternsize=(board_w,board_h)
-            found, corners=cv.FindChessboardCorners(raw, paternsize, cv.CV_CALIB_CB_ADAPTIVE_THRESH)
-            if found==0:
-                self.SetStatusText('Chessboard Pattern could not be detected')
-                continue
+            answer=wx.MessageBox('Put Chessboard Pattern ( %dx%d) into %d. Position' %(board_w,board_h,detectsuccsess+1), 'Calibration Procedure',style=wx.OK|wx.CANCEL|wx.ICON_EXCLAMATION)
+            if answer==wx.OK:
+                temp = cv.CreateImageHeader((self.imagetuple[1],self.imagetuple[2]),8,3)
+                raw = cv.CreateImage((self.imagetuple[1],self.imagetuple[2]),8,1)
+                cv.SetData(temp, self.imagetuple[0])
+                cv.CvtColor(temp,raw,cv.CV_RGB2GRAY)
+                paternsize=(board_w,board_h)
+                #print 'try to find patern'
+                found, corners=cv.FindChessboardCorners(raw, paternsize, cv.CV_CALIB_CB_ADAPTIVE_THRESH)
+                #print found, corners
+                ##break here
+                #needcalibpic=False
+                if found==0:
+                    self.SetStatusText('Chessboard Pattern could not be detected')
+                    continue
+                else:
+                    #Get subpixel accuracy on those corners
+                    cv.FindCornerSubPix( raw, corners, ( 11, 11 ),( -1, -1 ), ( cv.CV_TERMCRIT_EPS+cv.CV_TERMCRIT_ITER, 30, 0.1))
+                    cv.DrawChessboardCorners(temp, paternsize, corners, 1)
+                    i= detectsuccsess*board_n
+                    j= 0
+                    stop=False
+                    while not stop:
+                        image_points[i,0] = corners[j][0]
+                        image_points[i,1] = corners[j][1]
+                        objekt_points[i,0] = j/board_w
+                        objekt_points[i,1] = j%board_w
+                        objekt_points[i,2] = 0.0
+                        i+=1
+                        j+=1
+                        if j>=board_n:
+                            stop=True
+                    point_counts[detectsuccsess,0]=board_n
+                    detectsuccsess+=1
+                    self.SetStatusText('%.0f Chessboard Pattern successfully detected' % detectsuccsess)
+                    #cv.ShowImage('Calibration',self.image)
+                    self.Replot()
+                    if detectsuccsess>=n_boards:
+                        needcalibpic = False
+                #self.displayImage(self.image,self.imagepanel)
             else:
-                #Get subpixel accuracy on those corners
-                cv.FindCornerSubPix( raw, corners, ( 11, 11 ),( -1, -1 ), ( cv.CV_TERMCRIT_EPS+cv.CV_TERMCRIT_ITER, 30, 0.1))
-                cv.DrawChessboardCorners(self.image, paternsize, corners, 1)
-                i= detectsuccsess*board_n
-                j= 0
-                stop=False
-                while not stop:
-                    image_points[i,0] = corners[j][0]
-                    image_points[i,1] = corners[j][1]
-                    objekt_points[i,0] = j/board_w
-                    objekt_points[i,1] = j%board_w
-                    objekt_points[i,2] = 0.0
-                    i+=1
-                    j+=1
-                    if j>=board_n:
-                        stop=True
-                point_counts[detectsuccsess,0]=board_n
-                detectsuccsess+=1
-                self.SetStatusText('%.0f Chessboard Pattern successfully detected' % detectsuccsess)
-                #cv.ShowImage('Calibration',self.image)
-                self.Replot()
-                sleep(1)
-                if detectsuccsess>=n_boards:
-                    needcalibpic = False
-            #self.displayImage(self.image,self.imagepanel)
+                needcalibpic = False
+                detectsuccsess=0
+                    
         if (detectsuccsess>0):
             image_points_new = cv.CreateMat(detectsuccsess*board_n,2,cv.CV_32FC1)
             objekt_points_new = cv.CreateMat(detectsuccsess*board_n,3,cv.CV_32FC1)
@@ -265,7 +275,7 @@ class LiveTrackWin(wx.Frame):
             rot  = cv.CreateMat(detectsuccsess,3,cv.CV_32FC1)
             trans= cv.CreateMat(detectsuccsess,3,cv.CV_32FC1)
             #self.CalibData.intrinsic, self.CalibData.distortion = cv.CalibrateCamera2( objekt_points_new,image_points_new, point_counts_new, cv.GetSize( self.cvdistimage ),intrinsic_matrix)
-            cv.CalibrateCamera2( objekt_points_new,image_points_new, point_counts_new, cv.GetSize( self.image ),intrinsic_matrix,distortion_coeffs,rot,trans,0)
+            cv.CalibrateCamera2( objekt_points_new,image_points_new, point_counts_new, cv.GetSize( temp ),intrinsic_matrix,distortion_coeffs,rot,trans,0)
             self.CalibData.intrinsic=intrinsic_matrix
             self.CalibData.distortion=distortion_coeffs
             self.SetStatusText('Camera Calibration successfull')

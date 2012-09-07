@@ -435,7 +435,7 @@ class DataProtoThread(threading.Thread):
                         epar=self.GetEllipWithNum(self.elliplist,self.toplot[1])
                         #correct position concerning cam calibration
                         if self.calibrated:
-                            epar.MidPos[0],epar.MidPos[1]=self.KoordinatestoUndist(self.intrinsic,self.distortion,epar.MidPos[0],epar.MidPos[1])
+                            epar.MidPos=self.KoordinatestoUndist(self.intrinsic,self.distortion,epar.MidPos[0],epar.MidPos[1])
                         
                         if self.toplot[2]=='MidPos x':
                             this=epar.MidPos[0]

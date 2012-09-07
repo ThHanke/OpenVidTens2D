@@ -86,7 +86,7 @@ class LiveCamWin(wx.Frame):
         
     def VidCapProperties(self,event):
         #stop aquiring
-        self.aquirequeue.put((self,None,list()),False)
+        self.aquirequeue.put((self,None),False)
         self.caminterface.displayCaptureFilterProperties()
         #start again
         self.aquirequeue.put((self,self.caminterface),False)
@@ -328,7 +328,7 @@ class LiveCamWin(wx.Frame):
         self.gothrough=True
 
     def OnClose(self, event):
-        self.aquirequeue.put((self,None,list()),False)
+        self.aquirequeue.put((self,None),False)
         sleep(0.3)
         try:
             del self.caminterface
