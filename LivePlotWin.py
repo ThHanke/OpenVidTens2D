@@ -2,6 +2,8 @@
 import wx,cv
 import threading
 import Queue
+import multiprocessing
+
 import os
 import string
 
@@ -79,12 +81,14 @@ class LivePlotWin(wx.Frame):
 
         #spwan queue
 
-        self.plotwritequeue=Queue.LifoQueue(1)
+        self.plotwritequeue=multiprocessing.Queue(1)
+        self.parentendpipe,self.childendpipe=multiprocessing.Pipe()
         #spawn pool of threads
-        t=DataProtoThread(self,self.winsource.resultqueuePlot,self.plotwritequeue)
-
+        t=DataProtoProcess(self.childendpipe,self.winsource.resultqueuePlot,self.plotwritequeue)
+        self.SendStatustoBackgroundProcess()
+        
         #spawn pool of threads
-        t=PlotWriteThread(self,self.plotwritequeue)
+        t=PlotWriteThread(self,self.parentendpipe,self.plotwritequeue)
 
         self.startbutton.Bind(wx.EVT_BUTTON, self.OnStart)
         self.stopbutton.Bind(wx.EVT_BUTTON, self.OnStop)
@@ -92,7 +96,7 @@ class LivePlotWin(wx.Frame):
 
         self.tree.Bind(wx.EVT_MOUSE_EVENTS,self.OnSelChanged)
         self.tree.Bind(wx.EVT_TREE_SEL_CHANGED,self.OnSelChanged)
-        self.tree.Bind(wx.EVT_TREE_SEL_CHANGING,self.OnSelChanging)
+        #self.tree.Bind(wx.EVT_TREE_SEL_CHANGING,self.OnSelChanging)
 
         self.imageslist=wx.ImageList(16,16)
 
@@ -109,7 +113,8 @@ class LivePlotWin(wx.Frame):
 
         self.Layout()
         self.Show()
-        
+    def SendStatustoBackgroundProcess(self):
+        self.parentendpipe.send((self.itemlist,self.toplotlist,self.tofile,self.filename,self.winsource.calibrated,self.winsource.CalibData,self.shouldclear))
     def OnStart(self,event):
         self.tofile=True
         self.filename=self.filetext.GetValue()
@@ -133,12 +138,13 @@ class LivePlotWin(wx.Frame):
             self.filetext.SetValue(self.filename)
             
         self.fp=open(self.filename,'w',0)
-
-                
+       
         self.WriteDataHead(self.fp)
         self.SetStatusText('Capturing')
         self.capturestarttime=clock()
-        self.data=list()
+        #self.data=list()
+        self.SendStatustoBackgroundProcess()
+        
     def WriteDataHead(self,fileinter):
         string=''
         for i in range(len(self.toplotlist)):
@@ -154,6 +160,8 @@ class LivePlotWin(wx.Frame):
         self.tofile=False
         if self.fp!=None:
             self.fp.close()
+
+        self.SendStatustoBackgroundProcess()
         
         try:
             del self.videowriter
@@ -163,6 +171,8 @@ class LivePlotWin(wx.Frame):
         self.SetStatusText('Stopped Capturing')
     def OnClear(self,event):
         self.shouldclear=True
+        self.SendStatustoBackgroundProcess()
+        self.shouldclear=False
         self.SetStatusText('Cleared live plot')
         
     def GetEllipWithNum(self,liste,num):
@@ -212,8 +222,15 @@ class LivePlotWin(wx.Frame):
                                     self.data = list()
                                     this=str(self.tree.GetItemText(parent)),int(self.tree.GetItemText(item)),str(self.tree.GetItemText(subitem))
                                     self.toplotlist.append(this)
+                self.SendStatustoBackgroundProcess()
+                #print 'changes where send'
+            
 
     def BuildTreeCtrl(self):
+
+        if self.winsource.winsource.isfileinterface:
+            if self.winsource.winsource.gothrough:
+                self.winsource.winsource.gothrough=False
         
         self.tree.DeleteAllItems()
         Element = self.tree.AddRoot('Element')
@@ -269,87 +286,45 @@ class LivePlotWin(wx.Frame):
                         grandgrandchild=self.tree.GetNextChild(grandgrandchild[0],grandgrandchild[1])
                     grandchild=self.tree.GetNextChild(grandchild[0],grandchild[1])
                 child=self.tree.GetNextChild(child[0],child[1])
-    def PicProcessed(self,event):
-        # will not be called
-        if event.msg=="Pic processed!":
-            fromqueue=self.winsource.resultqueuePlot.get()
-            self.winsource.resultqueuePlot.task_done()
-            timestamp, self.elliplist, self.connectlist  =fromqueue[0],fromqueue[2], fromqueue[3]
-            if len(self.itemlist)!=len(self.elliplist)+len(self.connectlist):
-                #print "rebuild tree 1" 
-                self.itemlist=list()
-                self.itemlist.extend(self.elliplist)
-                self.itemlist.extend(self.connectlist)
-                self.BuildTreeCtrl()
-            if len(self.itemlist)>0:
-                
-                self.toqueue.append((timestamp, self.elliplist, self.connectlist,self.toplotlist,self.tofile,self.winsource.calibrated,self.winsource.CalibData.intrinsic,self.winsource.CalibData.distortion,self.shouldclear))
 
-                try:
-                    self.dataqueue.put(self.toqueue)
-                except Queue.Full:
-                    print 'plotdataqueue full'
-                self.toqueue=list()
-            if len(self.itemlist)!=len(self.elliplist)+len(self.connectlist):
-                #print "rebuild tree 2"
-                self.itemlist=list()
-                self.itemlist.extend(self.elliplist)
-                self.itemlist.extend(self.connectlist)
-                self.BuildTreeCtrl()
-            if self.shouldclear:
-                print 'ok'
-                self.shouldclear=False
-
-        if event.msg=="Data ready!":
-            
-            #print "Data received"
-            self.acttime=clock()
-            if self.acttime-self.lasttime<1:
-                self.framecount+=1
-            else:
-                self.SetStatusText('FPS: '+str(self.framecount),1)
-                self.framecount=1
-                self.lasttime=self.acttime
- 
-            #for plotting
-            panelwidth,panelheight=self.panel.GetSize()
-            self.plotter.SetSize(size=(panelwidth,panelheight))
-
-            datatoqueue=list()
-            datatoqueue.append((event.data[0],self.toplotlist, self.plotter))
-            try:
-                self.plotwritequeue.put(datatoqueue,False)
-            except Queue.Full:
-                print 'plotdraw queue full'
-
-            if self.tofile:
-                self.fp.writelines(event.data[1])
     def OnClose(self,event):
         for item in self.childs:
             item.OnClose(True)
         self.Destroy()
 
-class DataProtoThread(threading.Thread):
+class DataProtoProcess(multiprocessing.Process):
     """Background Worker Thread Class."""
 
-    def __init__(self, parent,dataqueue,resultqueue):
+    def __init__(self, pipeend,dataqueue,resultqueue):
         """Init Worker Thread Class."""
-        threading.Thread.__init__(self)
-        self.parent=parent
+        multiprocessing.Process.__init__(self)
+        self.pipeend=pipeend
         self.dataqueue=dataqueue
         self.resultqueue=resultqueue
         self.data=list()
-        self.tofile=False
-        self.filename=None
+##        self.tofile=False
+##        self.filename=None
         self.fp=None
-        self.setDaemon(True)
+##        self.daemon=True
+        self.itemlist=list()
+        self.toplotlist=list()
+        self.tofile=False
+        self.calibrated=False
+        self.calibdata=None
+
+        self.colours=('BLACK','RED','BLUE','GREEN','PINK','YELLOW','CYAN','PEACHPUFF','TURQUOSE','DARKRED','DARKBLUE','DARKGREEN','IVORY','MINTCREAM','NAVY','SEAGREEN','GOLD','SALMON','MAROON','PURPLE')
+               
         self.start()
         
         # start the thread
     def run(self):
         #print "Aquirethread started "
         while True:
-        
+            #get actuall data form WInPlot
+            if self.pipeend.poll():
+                self.itemlist,self.toplotlist,self.tofile,self.filename,self.calibrated,self.calibdata,self.shouldclear=self.pipeend.recv()
+                #print self.toplotlist
+                
             (self.timestamp,self.image, self.elliplist, self.connectlist)=self.dataqueue.get()
             #print "DataProtothread got task"
             resultstring=''
@@ -359,28 +334,15 @@ class DataProtoThread(threading.Thread):
             cv.SetData(temp, self.image[0])
             self.image=temp
 
-            if len(self.parent.itemlist)!=len(self.elliplist)+len(self.connectlist):
-                #print "rebuild tree 1" 
-                self.parent.itemlist=list()
-                self.parent.itemlist.extend(self.elliplist)
-                self.parent.itemlist.extend(self.connectlist)
-                self.parent.BuildTreeCtrl()
-            
-            
-            self.toplotlist=self.parent.toplotlist
-            self.tofile=self.parent.tofile
-            self.calibrated=self.parent.winsource.calibrated
-            self.intrinsic=self.parent.winsource.CalibData.intrinsic
-            self.distortion=self.parent.winsource.CalibData.distortion
-            self.shouldclear=self.parent.shouldclear
 
 
-            if self.parent.shouldclear:
+            if self.shouldclear:
                 self.data=list()
-                self.parent.shouldclear=False
+                self.shouldclear=False
           
             #plot selection and write to file
             plotlist=list()
+            self.plotmarkerlist=list()
        
             for listpos, item in enumerate(self.toplotlist):
                 self.toplot=self.toplotlist[listpos]
@@ -411,8 +373,8 @@ class DataProtoThread(threading.Thread):
                     #correct position concerning cam calibration
 
                     if self.calibrated:
-                        x1,y1=self.KoordinatestoUndist(self.intrinsic,self.distortion,epar1.MidPos[0],epar1.MidPos[1])
-                        x2,y2=self.KoordinatestoUndist(self.intrinsic,self.distortion,epar2.MidPos[0],epar2.MidPos[1])
+                        x1,y1=self.KoordinatestoUndist(self.calibdata.intrinsic,self.calibdata.distortion,epar1.MidPos[0],epar1.MidPos[1])
+                        x2,y2=self.KoordinatestoUndist(self.calibdata.intrinsic,self.calibdata.distortion,epar2.MidPos[0],epar2.MidPos[1])
                         rx,ry=abs(x1-x2),abs(y1-y2)
                         
                     else:
@@ -435,7 +397,7 @@ class DataProtoThread(threading.Thread):
                         epar=self.GetEllipWithNum(self.elliplist,self.toplot[1])
                         #correct position concerning cam calibration
                         if self.calibrated:
-                            epar.MidPos=self.KoordinatestoUndist(self.intrinsic,self.distortion,epar.MidPos[0],epar.MidPos[1])
+                            epar.MidPos=self.KoordinatestoUndist(self.calibdata.intrinsic,self.calibdata.distortion,epar.MidPos[0],epar.MidPos[1])
                         
                         if self.toplot[2]=='MidPos x':
                             this=epar.MidPos[0]
@@ -463,8 +425,15 @@ class DataProtoThread(threading.Thread):
                     self.data[listpos]=temp
                 else:
                     self.data.append(temp)
-                if self.tofile:
-                    self.parent.fp.writelines(string+'\n')
+                    
+                line = plot.PolyLine(temp,colour=self.colours[listpos], width=1)
+                self.plotmarkerlist.append(line)
+                marker = plot.PolyMarker(temp, marker='circle',colour=self.colours[listpos],width=1, size=1)
+                self.plotmarkerlist.append(marker)
+
+            if self.tofile:
+                self.fp=open(self.filename,'a',0)
+                self.fp.writelines(string+'\n')
     ##        if self.tofile:
     ##            self.fp.writelines(string+'\n')
     ##            
@@ -484,9 +453,21 @@ class DataProtoThread(threading.Thread):
                     
             #resultstring=resultstring+string+'\n'
 
+            
+            
+
+
+            for i in range(len(self.data)):
+                
+                line = plot.PolyLine(self.data[i],colour=self.colours[i], width=1)
+                plotlist.append(line)
+                marker = plot.PolyMarker(self.data[i], marker='circle',colour=self.colours[i],width=1, size=1)
+                plotlist.append(marker)
+
             try:
-                self.resultqueue.put(self.data,False)
+                self.resultqueue.put((self.plotmarkerlist,self.elliplist, self.connectlist),False)
             except Queue.Full:
+                #print 'WinPlot bmppaint thread is busy'
                 pass
                     
             #self.dataqueue.task_done()
@@ -532,29 +513,33 @@ class DataProtoThread(threading.Thread):
 class PlotWriteThread(threading.Thread):
     """Background Worker Thread Class."""
 
-    def __init__(self, parent, plotwritequeue):
+    def __init__(self, parent, pipeend,plotwritequeue):
         """Init Worker Thread Class."""
         threading.Thread.__init__(self)
         self.plotwritequeue=plotwritequeue
         self.parent=parent
-        self.colours=('BLACK','RED','BLUE','GREEN','PINK','YELLOW','CYAN','PEACHPUFF','TURQUOSE','DARKRED','DARKBLUE','DARKGREEN')
+        self.pipeend=pipeend
         self.setDaemon(True)
         self.start()
+        self.elliplist=list()
+        self.connectlist=list()
         # start the thread
 
     def run(self):
         #print "Aquirethread started "+str(self.num)
         while True:
-            data=self.plotwritequeue.get()
-            #print "Aquirethread got task"+ " "+str(self.num)+" "+str(len(pointerlist))
-            plotlist=list()
+            #print 'running'
+            #update WinPlot treecontrol
 
-            for i in range(len(data)):
-                
-                line = plot.PolyLine(data[i],colour=self.colours[i], width=1)
-                plotlist.append(line)
-                marker = plot.PolyMarker(data[i], marker='circle',colour=self.colours[i],width=1, size=1)
-                plotlist.append(marker)
+            plotlist,self.elliplist,self.connectlist=self.plotwritequeue.get()
+            #print plotlist
+
+            if len(self.parent.itemlist)!=len(self.elliplist)+len(self.connectlist):
+                #print "rebuild tree items and send " 
+                self.parent.itemlist=list()
+                self.parent.itemlist.extend(self.elliplist)
+                self.parent.itemlist.extend(self.connectlist)
+                self.parent.BuildTreeCtrl()
 
             if len(plotlist)>0:
                 panelwidth,panelheight=self.parent.panel.GetSize()
@@ -565,5 +550,5 @@ class PlotWriteThread(threading.Thread):
                 self.parent.plotter.SetXSpec('min')
                 self.parent.plotter.SetYSpec('min')   
                 self.parent.plotter.Redraw()
-        self.plotwritequeue.task_done()
+        #self.plotwritequeue.task_done()
 

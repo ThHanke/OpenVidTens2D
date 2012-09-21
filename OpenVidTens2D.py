@@ -4,7 +4,7 @@ import wx,cv
 from time import clock
 from time import sleep
 
-
+import multiprocessing
 
 #globals
 import config
@@ -73,7 +73,7 @@ class App(wx.App):
         return True
 
 if __name__=="__main__":
-    
+    multiprocessing.freeze_support()    
     #app = App(redirect=False)
     app = App(redirect=0)
     app.MainLoop()

@@ -19,6 +19,7 @@ ID_CCAL=wx.NewId()
 ID_CCALL=wx.NewId()
 ID_CCALS=wx.NewId()
 ID_PICKALL=wx.NewId()
+ID_SRFACTOR=wx.NewId()
 
 def contour_iterator(contour):
     while contour:
@@ -50,6 +51,7 @@ class LiveTrackWin(wx.Frame):
         self.Bind(wx.EVT_MENU, self.LoadCalibration, id=ID_CCALL)
         self.Bind(wx.EVT_MENU, self.SaveCalibration, id=ID_CCALS)
         self.Bind(wx.EVT_MENU, self.PickAll, id=ID_PICKALL)
+        self.Bind(wx.EVT_MENU, self.ChangeSRFactor, id=ID_SRFACTOR)
 
         self.panel.Bind(wx.EVT_MOUSEWHEEL, self.Mousewheel)
         self.panel.Bind(wx.EVT_ENTER_WINDOW,self.MouseInWindow)
@@ -83,6 +85,8 @@ class LiveTrackWin(wx.Frame):
 
         self.CalibData=CalibData()
         self.calibrated=False
+
+        self.seachrectfactor=15
         
         self.childs=list()
 
@@ -90,7 +94,7 @@ class LiveTrackWin(wx.Frame):
         #init variables in backgroundprocess
         self.SendStatustoBackgroundProcess()
 
-        t=BmpPaintThread(self,self.resultqueueTrack)
+        t=WinTrackBmpPaintThread(self,self.resultqueueTrack)
 
         self.Show()
     def CreateMenu(self):
@@ -102,6 +106,7 @@ class LiveTrackWin(wx.Frame):
         Operate.Append(ID_CCALS,'&Save Calibration','Save camera calibration')
         Operate.Append(ID_CCAL,'&Calibration','Camera Calibration')
         Operate.Append(ID_PICKALL,'&Pick All','Try to pick all ellipses')
+        Operate.Append(ID_SRFACTOR,'&SRFactor','Change SearchrectFaktor')
         
         return Menubar   
     def Replot(self):
@@ -111,7 +116,7 @@ class LiveTrackWin(wx.Frame):
         except Queue.Full:
             pass
     def SendStatustoBackgroundProcess(self):
-        self.parentendpipe.send((self.newellip,self.PickAll,self.rightdown))
+        self.parentendpipe.send((self.newellip,self.PickAll,self.rightdown,self.seachrectfactor))
     def Mousewheel(self,event):
         if self.mousein:
             pt = event.GetPosition()
@@ -147,6 +152,7 @@ class LiveTrackWin(wx.Frame):
             #get mouse pic koords
             self.newellip=self.Panel2ImageKoord(self.panelwidth,self.panelheight,self.zoomrect,pt)
             self.SendStatustoBackgroundProcess()
+            self.newellip=None
             
             if self.winsource.isfileinterface:
                 #print 'onSlider'
@@ -167,13 +173,14 @@ class LiveTrackWin(wx.Frame):
             self.SendStatustoBackgroundProcess()
             #print self.rightdown
             if self.winsource.isfileinterface:
+                #print 'mouse right klicked'
                 self.winsource.OnSlider(True)
     def MouseMove(self,event):
         if self.mousein:
             if self.parentendpipe.poll():
-                print 'polled and not empty'
+                #print 'polled and not empty'
                 (self.timestamp, self.elliplist, self.connectlist)=self.parentendpipe.recv()
-                print 'update recevied'
+                #print 'update recevied'
             if event.RightIsDown()and self.rightdown[0]:
                 pt = event.GetPosition()
                 #get mouse pic koords
@@ -347,6 +354,16 @@ class LiveTrackWin(wx.Frame):
             
     def PickAll(self,event):
         self.PickAll=True
+        self.SendStatustoBackgroundProcess()
+        self.PickAll=False
+        self.SendStatustoBackgroundProcess()
+    def ChangeSRFactor(self,event):
+        dlg=wx.NumberEntryDialog(self,'Enter new SearchrectFactor','SRF:','SearchrectFactor',15,15,50)
+        if dlg.ShowModal() == wx.ID_OK:
+            self.seachrectfactor=dlg.GetValue()
+            #print self.seachrectfactor
+            self.SendStatustoBackgroundProcess()
+            dlg.Destroy()
     def Panel2ImageKoord(self,panelwidth,panelheight,zoomrect,pt):
         pos=int(float(pt[0])/float(panelwidth)*zoomrect[2]+zoomrect[0]),int(float(pt[1])/float(panelheight)*zoomrect[3]+zoomrect[1])
         return pos
@@ -459,6 +476,8 @@ class ProcessPicThread(multiprocessing.Process):
         self.lasttime=0
         self.framecount=0
         self.actframecount=0
+
+        self.seachrectfactor=1.5
          
         self.num=num
         self.elliplist=list()
@@ -469,14 +488,13 @@ class ProcessPicThread(multiprocessing.Process):
         # start the thread
     def run(self):
         while True:
-            #print 'running'
             item=self.queue.get()
             self.timestamp=item[0]
             self.raw=item[1]
             #print type(self.raw)
             if self.pipeend.poll():
-                self.newellip,self.pickall,self.rightdown=self.pipeend.recv()
-            #print self.rightdown
+                self.newellip,self.pickall,self.rightdown,self.seachrectfactor=self.pipeend.recv()
+            #print self.newellip,self.pickall,self.rightdown,self.seachrectfactor
             self.newelliplist=list()
             self.newconnectlist=list()
             self.acttime=clock()
@@ -502,8 +520,6 @@ class ProcessPicThread(multiprocessing.Process):
                 else:
                     newcon.Pt2=None
 
-                #print newcon.Pt1,newcon.Pt2
-
                 if newcon.Pt1!=newcon.Pt2 and newcon.Pt1!=None and newcon.Pt1!=None:
                  
                     newcon.Num=self.NumConnect(self.connectlist)
@@ -516,7 +532,7 @@ class ProcessPicThread(multiprocessing.Process):
                     
                     epar=self.GetEllipWithNum(self.elliplist,newcon.Pt1)
                     self.elliplist.remove(epar)
-                   
+                    #print 'ellip removed'
                     self.rightdown=False, (None,None), (None,None)
                 else:
                     del newcon
@@ -533,6 +549,7 @@ class ProcessPicThread(multiprocessing.Process):
             if self.pickall:
                 #print 'pick all circles through hough transform'
                 self.PickAll(self.raw)
+
 
             if self.newellip!=None:
                 #check if in already found ellip
@@ -569,33 +586,36 @@ class ProcessPicThread(multiprocessing.Process):
     def ProcessImage(self, grayimage, rgbimage, ellipses,connections):
         #track ellipses
         ellipses=self.TrackEllip(grayimage,ellipses)
-        #remove lost connections
-        for listpos, item in enumerate(connections):
-                    
+        #print 'remove lost connections'
+        for i in range(len(connections),0,-1): 
             linepar=config.LinePar()
-            linepar=connections[listpos]
-
+            linepar=connections[i-1]
             if self.GetEllipWithNum(ellipses,linepar.Pt1)==None or self.GetEllipWithNum(ellipses,linepar.Pt2)==None:
                 #print "connection removed"
                 connections.remove(linepar)
         return ellipses, connections, rgbimage
     def PickEllip(self,image,posx,posy,elliplist):
         found=0
-        searchrectsize=20
+        firstsearchrectsize=5
+        searchrectsize=5
         errcount=0
         #print 'create memstorage'
         stor = cv.CreateMemStorage(0)
         
         while found <1:
-            searchrectsize=int(searchrectsize+searchrectsize/10)
+            #searchrectsize=int(searchrectsize+searchrectsize/10)
+            searchrectsize=int(searchrectsize+firstsearchrectsize)
+            #print searchrectsize
             
             searchrectr=(posx-searchrectsize,posy-searchrectsize,searchrectsize*2,searchrectsize*2)
-            #print searchrectsize,image.width
+            #print searchrectr
 
             if searchrectsize*2>image.width:
                 break
             #print 'get search contour image'
             rectimage,searchrect=self.GetSearchCounturImage(image,searchrectr)
+
+            
             #print 'search image created'
             if rectimage==None:
                 continue
@@ -617,7 +637,7 @@ class ProcessPicThread(multiprocessing.Process):
                     # Fits ellipse to current contour.
                     EllipParnew=self.FitEllipOnContour(c)
 
-                    cv.Rectangle(self.image,(searchrect[0],searchrect[1]),(int(searchrect[0]+searchrect[2]),int(searchrect[1]+searchrect[3])),cv.CV_RGB(255,0,0),1,8,0)
+                    
 
                     
                     #define Number
@@ -630,9 +650,19 @@ class ProcessPicThread(multiprocessing.Process):
                     #EllipParnew.Angle=-EllipParnew.Angle
                     EllipParnew.mov=0,0
 
-                    if  EllipParnew.Size[1]>=1 and EllipParnew.Size[0]>=1 and EllipParnew.Size[1]<searchrect[3]/2 and EllipParnew.Size[0]<searchrect[2]/2 :
+                    b,h=self.GetAABBEllip(EllipParnew)
+
+                    left=int(EllipParnew.MidPos[0]-b/2)
+                    low=int(EllipParnew.MidPos[1]-h/2)
+                    
+
+                    #if  EllipParnew.Size[1]>=1 and EllipParnew.Size[0]>=1 and EllipParnew.Size[1]<searchrect[3]/2 and EllipParnew.Size[0]<searchrect[2]/2 :
                     #if  EllipParnew.Size[1]!=0 and EllipParnew.Size[0]!=0  and (searchrect[0]+searchrect[2]*3/5.0)<EllipParnew.MidPos[0]<(searchrect[0]+searchrect[2]*4/5.0) and (searchrect[1]+searchrect[3]/3.0)<EllipParnew.MidPos[1]<(searchrect[1]+searchrect[3]/3.0*2.0):
+                    if left>searchrect[0] and low>searchrect[1] and b<searchrect[2] and h<searchrect[3] and b>searchrect[2]/3 and h>searchrect[3]/3:
                         found=1
+                        #print 'found ellip'
+                        #cv.Rectangle(self.image,(searchrect[0],searchrect[1]),(int(searchrect[0]+searchrect[2]),int(searchrect[1]+searchrect[3])),cv.CV_RGB(255,0,255),1,8,0)
+                        #cv.Rectangle(self.image,(left,low),(int(left+b),int(low+h)),cv.CV_RGB(0,255,255),1,8,0)
                         EllipParnew.searchrect=searchrect
                         break
             
@@ -647,14 +677,20 @@ class ProcessPicThread(multiprocessing.Process):
 
     def PickAll(self,gray):
         storage = cv.CreateMat(50, 1, cv.CV_32FC3)
-        cv.HoughCircles(gray, storage, cv.CV_HOUGH_GRADIENT, 2, int(gray.width/20), 192, 200)
+        try:
+            cv.HoughCircles(gray, storage, cv.CV_HOUGH_GRADIENT, 2, int(gray.width/20), 192, 50)
+        except:
+            #print 'null pointer bla bla'
+            return
         #print storage
         for i in range(0,storage.rows):
                 row=list()
                 for j in range(0,storage.cols):
-                        #print 'pick ellip'
+                    #print 'pick ellip'
+                    #print int(storage[i,j][0]),int(storage[i,j][1])
                     ellip=self.PickEllip(self.raw,int(storage[i,j][0]),int(storage[i,j][1]),self.elliplist)    
                     if not ellip==None:
+                        #print 'is regular ellip'
                         self.elliplist.append(ellip)
         
         
@@ -662,27 +698,32 @@ class ProcessPicThread(multiprocessing.Process):
         
         elliplistnew=list()
         for listpos, item in enumerate(ellipses):
+            #print 'track ellip'
             triedtorescue=False
             ellip=config.EllipPar()
             
             ellip=ellipses[listpos]
             
+            
             b,h=self.GetAABBEllip(ellip)
 
-            b,h=int(b*1.5),int(h*1.5)
-            if b<20:
-                b=20
-            if h<20:
-                h=20
+            b,h=int(b*self.seachrectfactor/10),int(h*self.seachrectfactor/10)
+##            if b<15:
+##                b=15
+##            if h<15:
+##                h=15
 
             #with movement correction
             searchrecttr = (int(ellip.MidPos[0]+int(ellip.mov[0])-b/2),int(ellip.MidPos[1]+int(ellip.mov[1])-h/2),int(b),int(h))
-           
+
             #print 'finish init %(listpos)d in frame %(framenum)d ' % vars()
             rectimage, searchrect=self.GetSearchCounturImage(image,searchrecttr)
+            #print rectimage, searchrect
 
             if rectimage==None:
                 continue
+
+            #cv.Rectangle(self.image,(searchrect[0],searchrect[1]),(int(searchrect[0]+searchrect[2]),int(searchrect[1]+searchrect[3])),cv.CV_RGB(255,0,0),2,8,0)
 
             #pixout,pixin=self.InOutVal(rectimage)
 
@@ -697,7 +738,7 @@ class ProcessPicThread(multiprocessing.Process):
                     # Fits ellipse to current contour.
                     EllipParnew=self.FitEllipOnContour(c)
 
-                    cv.Rectangle(self.image,(searchrect[0],searchrect[1]),(int(searchrect[0]+searchrect[2]),int(searchrect[1]+searchrect[3])),cv.CV_RGB(255,0,0),1,8,0)
+                    
                     
                     #define Number
                     EllipParnew.Num=ellip.Num
@@ -709,9 +750,18 @@ class ProcessPicThread(multiprocessing.Process):
                     #EllipParnew.Angle=-EllipParnew.Angle
                     EllipParnew.mov=EllipParnew.MidPos[0]-ellip.MidPos[0],EllipParnew.MidPos[1]-ellip.MidPos[1]
 
-                    if  EllipParnew.Size[1]>=0 and EllipParnew.Size[0]>=0  :
+                    b,h=self.GetAABBEllip(EllipParnew)
+
+                    left=int(EllipParnew.MidPos[0]-b/2)
+                    low=int(EllipParnew.MidPos[1]-h/2)
+                    
+
+                    if left>searchrect[0] and low>searchrect[1] and b<searchrect[2] and h<searchrect[3] and b>searchrect[2]/3 and h>searchrect[3]/3:
+                    #if  EllipParnew.Size[1]>=0 and EllipParnew.Size[0]>=0  :
                     #if  EllipParnew.Size[1]!=0 and EllipParnew.Size[0]!=0  and (searchrect[0]+searchrect[2]*3/5.0)<EllipParnew.MidPos[0]<(searchrect[0]+searchrect[2]*4/5.0) and (searchrect[1]+searchrect[3]/3.0)<EllipParnew.MidPos[1]<(searchrect[1]+searchrect[3]/3.0*2.0):
                         found=1
+                        cv.Rectangle(self.image,(searchrecttr[0],searchrecttr[1]),(int(searchrecttr[0]+searchrecttr[2]),int(searchrecttr[1]+searchrecttr[3])),cv.CV_RGB(255,0,0),2,8,0)
+                        #print found
                         EllipParnew.searchrect=searchrect
                         break            
 
@@ -720,12 +770,16 @@ class ProcessPicThread(multiprocessing.Process):
                 elliplistnew.append(EllipParnew)            
             else:
                 ##dont try to rescue we are live
+                #print triedtorescue
                 #triedtorescue=True
                 if not triedtorescue:
+                    #print 'try to rescue'
                     
                     triedtorescue=True
                     rectlist=self.RescueList(searchrecttr,ellip.mov)
                     for rect in rectlist:
+
+                        #cv.Rectangle(self.image,(rect[0],rect[1]),(int(rect[0]+rect[2]),int(rect[1]+rect[3])),cv.CV_RGB(255,255,255),1,8,0)
                         
                         rectimage, searchrect=self.GetSearchCounturImage(image,rect)
                         if rectimage==None:
@@ -757,8 +811,15 @@ class ProcessPicThread(multiprocessing.Process):
                                 #EllipParnew.Angle=-EllipParnew.Angle
                                 EllipParnew.mov=EllipParnew.MidPos[0]-ellip.MidPos[0],EllipParnew.MidPos[1]-ellip.MidPos[1]
 
+                                b,h=self.GetAABBEllip(EllipParnew)
 
-                                if  EllipParnew.Size[1]<=1 and EllipParnew.Size[0]<=1 and (searchrect[0]+searchrect[2]*3/5.0)<EllipParnew.MidPos[0]<(searchrect[0]+searchrect[2]*4/5.0) and (searchrect[1]+searchrect[3]/3.0)<EllipParnew.MidPos[1]<(searchrect[1]+searchrect[3]/3.0*2.0):
+                                left=int(EllipParnew.MidPos[0]-b/2)
+                                low=int(EllipParnew.MidPos[1]-h/2)
+                                
+
+                                if left>searchrect[0] and low>searchrect[1] and b<searchrect[2] and h<searchrect[3] and b>searchrect[2]/3 and h>searchrect[3]/3:
+                               #if  EllipParnew.Size[1]<=1 and EllipParnew.Size[0]<=1 and (searchrect[0]+searchrect[2]*3/5.0)<EllipParnew.MidPos[0]<(searchrect[0]+searchrect[2]*4/5.0) and (searchrect[1]+searchrect[3]/3.0)<EllipParnew.MidPos[1]<(searchrect[1]+searchrect[3]/3.0*2.0):
+                                #if  EllipParnew.Size[1]>=0 and EllipParnew.Size[0]>=0  and EllipParnew.Size[0]>ellip.Size[0]*0.9 and EllipParnew.Size[1]>ellip.Size[1]*0.9 and EllipParnew.Size[0]<ellip.Size[0]*1.1 and EllipParnew.Size[1]<ellip.Size[1]*1.1:
                                     cv.Rectangle(self.image,(searchrect[0],searchrect[1]),(int(searchrect[0]+searchrect[2]),int(searchrect[1]+searchrect[3])),cv.CV_RGB(0,255,0),1,8,0)
                                     found=1
                                     EllipParnew.searchrect=searchrect
@@ -813,8 +874,8 @@ class ProcessPicThread(multiprocessing.Process):
     def RescueList(self,searchrect,mov):
         #make searchrect bigger and move around
         rectlist=list()
-        factors=range(1,5)
-        bfactors=range(1,5)
+        factors=range(1,3)
+        bfactors=range(1,3)
 
         for factor in factors:
             #teilen=12
@@ -924,7 +985,7 @@ class ProcessPicThread(multiprocessing.Process):
             posiblenum.remove(linepar.Num)
         return posiblenum[0]
     def CheckSubRect(self,image,rect):
-        if (rect[0]+rect[2])<=image.width and (rect[1]+rect[3])<=image.height and rect[0]>=0 and rect[1]>=0 and rect[2]>=20 and rect[3]>=20:
+        if (rect[0]+rect[2])<=image.width and (rect[1]+rect[3])<=image.height and rect[0]>=0 and rect[1]>=0 and rect[2]>=10 and rect[3]>=10:
             return True
         else:
             return False
@@ -965,7 +1026,7 @@ class ProcessPicThread(multiprocessing.Process):
             rect=(orx,ory,rect[2],rect[3])
         return rect
 
-class BmpPaintThread(threading.Thread):
+class WinTrackBmpPaintThread(threading.Thread):
     """Background Worker Thread Class."""
 
     def __init__(self, parent,bmppaintqueue):
