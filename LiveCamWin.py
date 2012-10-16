@@ -1,5 +1,5 @@
 
-import wx,cv,ctypes,os
+import wx,cv,cv2,numpy,ctypes,os
 import threading
 import Queue
 import VideoCapture
@@ -161,15 +161,6 @@ class LiveCamWin(wx.Frame):
                 self.caminterface=None
                 return False
 
-        
-
-        t=VidCapQueuePicThread(self.aquirequeue,self.bmppaintqueue)
-        t=WinCamBmpPaintThread(self.bmppaintqueue)
-            
-                
-
-        #print threading.enumerate()
-
         self.ScaledImg=cv.CreateImage((100,100),8,3)
         
         self.panel=wx.Panel(self, wx.ID_ANY, style=wx.BORDER_SUNKEN)
@@ -179,6 +170,16 @@ class LiveCamWin(wx.Frame):
 
         self.Layout()
         self.CreateMenu()
+        
+
+        t=VidCapQueuePicThread(self.aquirequeue,self.bmppaintqueue,self.totrackqueue,0)
+        t=WinCamBmpPaintThread(self.bmppaintqueue,self.panel)
+            
+                
+
+        #print threading.enumerate()
+
+
         #print 'start aquiring'
         self.aquirequeue.put((self,self.caminterface,False),False)
         return True
@@ -314,14 +315,13 @@ class LiveCamWin(wx.Frame):
 
         self.CleanUpBeforeInterfaceSwitch()
         
-        t=QueuePicThread(self.aquirequeue)
+        
 
 
         self.dirname=config.ProgDir
         self.ScaledImg=cv.CreateImage((100,100),8,3)
 
-        t=WinCamBmpPaintThread(self.bmppaintqueue)
-
+        
         
         self.ID_FTIMER=wx.NewId()
         self.Timer=wx.Timer(self, self.ID_FTIMER)
@@ -347,6 +347,9 @@ class LiveCamWin(wx.Frame):
         self.SetSizer(self.panelsizer)
 
         self.gothrough=False
+        t=QueuePicThread(self.aquirequeue,self.bmppaintqueue,self.totrackqueue)
+        t=WinCamBmpPaintThread(self.bmppaintqueue,self.panel)
+
 
         self.Layout()
 
@@ -416,29 +419,19 @@ class LiveCamWin(wx.Frame):
         else:
             #print 'set value'
             self.imageslider.SetValue(picnum)
-        
-        #print picnum
-        #print self.dirname+'\\'+self.filenames[picnum-1]
-        #have to use open and PIL bcause opnecv cant handle unicode filenames
-        try:
-            fp=open(self.dirname+'\\'+self.filenames[picnum-1],'rb')
-            temp=Image.open(fp)
-            if temp.mode!='RGB':
-                #print 'convert from '+test2.mode+' to RGB'
-                temp=temp.convert('RGB')
-        
-            self.image=cv.CreateImage(temp.size,cv.IPL_DEPTH_8U,3)
-            cv.SetData(self.image,temp.tostring())
-            cv.CvtColor( self.image, self.image, cv.CV_BGR2RGB)
-        except:
-            #print 'failed to load with PIL load with opencv'
-            self.image = cv.LoadImage(self.dirname+'\\'+self.filenames[picnum-1])
-        
+
+        from os.path import abspath, join
+
+        #print self.dirname
+
+        imagePath = abspath( join(self.dirname, self.filenames[picnum-1]) )
+        self.image=cv2.imread(imagePath,3)
+        self.image=cv2.cvtColor(self.image,cv2.COLOR_BGR2RGB)
 
         self.acttime=clock()
 
         #print 'send file to aquire'
-        self.aquirequeue.put((self,self.imageslider.GetValue(), self.image, self.image.width, self.image.height, False),False)
+        self.aquirequeue.put((self.imageslider.GetValue(), self.image, False),False)
 
     def GotoNextFile(self,event):
         #print 'go to next file'
@@ -470,10 +463,13 @@ class LiveCamWin(wx.Frame):
 class QueuePicThread(threading.Thread):
     """Background Worker Thread Class."""
 
-    def __init__(self, aquirequeue):
+    def __init__(self, aquirequeue,bmppaintqueue,totrackqueue):
         """Init Worker Thread Class."""
         threading.Thread.__init__(self)
         self.aquirequeue=aquirequeue
+        self.bmppaintqueue=bmppaintqueue
+        self.totrackqueue=totrackqueue
+        
         self.setDaemon(True)
         self.start()
         # start the thread
@@ -482,43 +478,22 @@ class QueuePicThread(threading.Thread):
         #print "Aquirethread started "
         while True:
             #print self.aquirequeue.queue
-            (parent,self.timestamp, rawdatapointer ,width, height,plsexit)=self.aquirequeue.get()
+            (self.timestamp, image, plsexit)=self.aquirequeue.get()
             if plsexit:
                 #print 'return'
                 return
             #print "Aquirethread got task"
             
-            if isinstance(rawdatapointer,cv.iplimage):
-                self.raw=cv.CreateImage((rawdatapointer.width,rawdatapointer.height),cv.IPL_DEPTH_8U,1)
-                cv.CvtColor(rawdatapointer,self.raw,cv.CV_RGB2GRAY)
 
-                gc=wx.ClientDC(parent.panel)
-                try:
-                    parent.bmppaintqueue.put((rawdatapointer, gc),False)
-                except Queue.Full:
-                    pass
-                    #print 'winCam1 bmppaintqueue is full'
-            else:
-                
-                #print rawdatapointer, width, height
-                try:
-                    self.memstring=ctypes.string_at(rawdatapointer,width*height)
-                except:
-                    break
-
-                # is avt-camera like input
-                self.raw= cv.CreateImageHeader((width,height),cv.IPL_DEPTH_8U, 1)
-                cv.SetData(self.raw, self.memstring,width)
-
-                gc=wx.ClientDC(parent.panel)
-                try:
-                    parent.bmppaintqueue.put((self.raw, gc),False)
-                except Queue.Full:
-                    pass
-                    #print 'winCam2 bmppaintqueue is full'
+            self.gray=cv2.cvtColor(image,cv2.COLOR_RGB2GRAY)
+            try:
+                self.bmppaintqueue.put((image),False)
+            except Queue.Full:
+                pass
+                #print 'winCam1 bmppaintqueue is full'
 
             try:
-                parent.totrackqueue.put((self.timestamp,(self.raw.tostring(),self.raw.width,self.raw.height)),False)
+                self.totrackqueue.put((self.timestamp,self.gray),False)
             except Queue.Full:
                 pass
                 #print 'totrackqueue is full'
@@ -528,17 +503,16 @@ class QueuePicThread(threading.Thread):
 class VidCapQueuePicThread(threading.Thread):
     """Background Worker Thread Class."""
 
-    def __init__(self, aquirequeue, bmppaintqueue, num=0):
+    def __init__(self, aquirequeue, bmppaintqueue, totrackqueue,num=0):
         """Init Worker Thread Class."""
         threading.Thread.__init__(self)
         self.aquirequeue=aquirequeue
         self.bmppaintqueue=bmppaintqueue
+        self.totrackqueue=totrackqueue
         
         self.num=num
         self.caminterface=None
-        self.lasthash=0
-        self.oldhistmax=0.0
-        
+        self.lasthash=0   
 
         self.lasttime=0
         self.framecount=0
@@ -561,19 +535,13 @@ class VidCapQueuePicThread(threading.Thread):
                 #print 'return'
                 return
 
-        
-            
-            
             if self.caminterface is not None:
                 rawdata=self.caminterface.getBuffer()  #datastring, width, height
                 newhash=hash(rawdata)
                 if newhash!=self.lasthash:
                     self.lasthash=newhash
                     self.timestamp=clock()
-
-                    
-
-                    
+ 
                     if self.timestamp-self.lasttime<1:
                         self.framecount+=1
                     else:
@@ -581,36 +549,37 @@ class VidCapQueuePicThread(threading.Thread):
                         self.framecount=1
                         self.lasttime=self.timestamp
                         
-                    temp=cv.CreateImageHeader((rawdata[1],rawdata[2]), cv.IPL_DEPTH_8U, 3)
-                    cv.SetData(temp, rawdata[0])
-
-                    self.raw=cv.CreateImage((rawdata[1],rawdata[2]),cv.IPL_DEPTH_8U,1)
-                    cv.CvtColor(temp,self.raw,cv.CV_RGB2GRAY)
+                    #create numpy array
+                    temp_np=numpy.fromstring(rawdata[0],numpy.uint8)
+                    np_temp=numpy.reshape(temp_np, (rawdata[2],rawdata[1],3))
+                    temp_np=cv2.flip(np_temp,0)
+                    temp_np=cv2.cvtColor(temp_np,cv2.COLOR_BGR2RGB)
+                    self.gray=cv2.cvtColor(temp_np,cv.CV_RGB2GRAY)
 
                     try:
-                        #parent.totrackqueue.put((self.timestamp,self.raw),False)
-                        parent.totrackqueue.put((self.timestamp,(self.raw.tostring(),self.raw.width,self.raw.height)),False)
+                        #self.totrackqueue.put((self.timestamp,(self.raw.tostring(),self.raw.width,self.raw.height)),False)
+                        self.totrackqueue.put((self.timestamp,self.gray),False)
+                        #print self.timestamp
                     except Queue.Full:
                         pass
                         #print 'totrackqueue is full'
 
-                    gc=wx.ClientDC(parent.panel)
                     try:
-                        self.bmppaintqueue.put((temp, gc),False)
+                        #self.bmppaintqueue.put((temp),False)
+                        self.bmppaintqueue.put((temp_np),False)
                     except Queue.Full:
                         pass
                         #print 'winCam bmppaintqueue3 is full'
-                    
-                #sleep(0.005)
-                
+
 
 class WinCamBmpPaintThread(threading.Thread):
     """Background Worker Thread Class."""
 
-    def __init__(self, bmppaintqueue):
+    def __init__(self, bmppaintqueue,panel):
         """Init Worker Thread Class."""
         threading.Thread.__init__(self)
         self.bmppaintqueue=bmppaintqueue
+        self.panel=panel
  
 
         self.ScaledImg=cv.CreateImage((100,100),8,3)
@@ -620,25 +589,19 @@ class WinCamBmpPaintThread(threading.Thread):
 
     def run(self):
         while True:
-            (image, dc)=self.bmppaintqueue.get()
-
-           
-
-
-
+            (image)=self.bmppaintqueue.get()
+            dc=wx.ClientDC(self.panel)
             #print "Bmpthread got task"
             panelwidth,panelheight=dc.GetSize()
             if (panelwidth <=0) or (panelheight <=0):
                 continue
-            if self.ScaledImg.width!=panelwidth or self.ScaledImg.height!=panelheight:
-                self.ScaledImg=cv.CreateImage((panelwidth,panelheight),8,3)
-            #print "start"
-            cv.Resize(image,self.ScaledImg,cv.CV_INTER_NN)
-            
-            cv.CvtColor(self.ScaledImg,self.ScaledImg,cv.CV_RGB2BGR)
-            self.bitmap=wx.BitmapFromBuffer(panelwidth,panelheight,self.ScaledImg.tostring()) 
-            dc.DrawBitmap(self.bitmap, 0, 0, False)
-
-                    
+            self.ScaledImg=cv2.resize(image,( panelwidth,panelheight))
+            #numpy array to bitmap
+            wximage=wx.EmptyImage(panelwidth,panelheight)
+            wximage.SetData( self.ScaledImg.tostring())
+            self.bitmap=wximage.ConvertToBitmap()
+            dc.DrawBitmap(self.bitmap, 0, 0, False)     
             self.bmppaintqueue.task_done()
+
+
 

@@ -1,11 +1,12 @@
 # -*- coding: cp1252 -*-
-import wx,cv
+import wx,cv,cv2,numpy
 import threading
 import Queue
 import multiprocessing
 
 import os
 import string
+import pickle
 
 import wx.lib.plot as plot
 
@@ -52,6 +53,8 @@ class LivePlotWin(wx.Frame):
         self.panel=wx.Panel(self.splitter, wx.ID_ANY, size=(500,500),style=wx.BORDER_SUNKEN)
         self.plotter = plot.PlotCanvas(self.panel)
         self.plotter.SetEnableLegend(True)
+        self.plotter.SetXSpec('min')
+        self.plotter.SetYSpec('min') 
  
         self.toqueue=list()
         self.itemlist=list()
@@ -94,9 +97,9 @@ class LivePlotWin(wx.Frame):
         self.stopbutton.Bind(wx.EVT_BUTTON, self.OnStop)
         self.clearbutton.Bind(wx.EVT_BUTTON, self.OnClear)
 
-        self.tree.Bind(wx.EVT_MOUSE_EVENTS,self.OnSelChanged)
+
         self.tree.Bind(wx.EVT_TREE_SEL_CHANGED,self.OnSelChanged)
-        #self.tree.Bind(wx.EVT_TREE_SEL_CHANGING,self.OnSelChanging)
+
 
         self.imageslist=wx.ImageList(16,16)
 
@@ -202,28 +205,27 @@ class LivePlotWin(wx.Frame):
     def OnSelChanging(self,event):
         pass
     def OnSelChanged(self,event):
-        if isinstance(event,wx.TreeEvent) or event.LeftUp():
-    
-       
-            if not self.tofile:
-                treesel=self.tree.GetSelections()
-                self.toplotlist=list()
-                for subitem in treesel:
-                    if self.tree.ItemHasChildren(subitem ):
-                        self.tree.UnselectItem(subitem )
-                        continue
-                    if subitem.IsOk():
-                        #self.tree.SetItemImage(subitem,0)
-                        item=self.tree.GetItemParent(subitem)
-                        if item.IsOk():
-                            parent = self.tree.GetItemParent(item)            
-                            if parent.IsOk():
-                                if self.tree.GetItemText(parent)=='Ellipse' or self.tree.GetItemText(parent)=='Connection':
-                                    self.data = list()
-                                    this=str(self.tree.GetItemText(parent)),int(self.tree.GetItemText(item)),str(self.tree.GetItemText(subitem))
-                                    self.toplotlist.append(this)
-                self.SendStatustoBackgroundProcess()
-                #print 'changes where send'
+
+        if not self.tofile:
+            treesel=self.tree.GetSelections()
+            print treesel
+            self.toplotlist=list()
+            for subitem in treesel:
+                if self.tree.ItemHasChildren(subitem ):
+                    self.tree.UnselectItem(subitem )
+                    continue
+                if subitem.IsOk():
+                    #self.tree.SetItemImage(subitem,0)
+                    item=self.tree.GetItemParent(subitem)
+                    if item.IsOk():
+                        parent = self.tree.GetItemParent(item)            
+                        if parent.IsOk():
+                            if self.tree.GetItemText(parent)=='Ellipse' or self.tree.GetItemText(parent)=='Connection':
+                                self.data = list()
+                                this=str(self.tree.GetItemText(parent)),int(self.tree.GetItemText(item)),str(self.tree.GetItemText(subitem))
+                                self.toplotlist.append(this)
+            self.SendStatustoBackgroundProcess()
+            #print 'changes where send'
             
 
     def BuildTreeCtrl(self):
@@ -324,17 +326,18 @@ class DataProtoProcess(multiprocessing.Process):
             if self.pipeend.poll():
                 self.itemlist,self.toplotlist,self.tofile,self.filename,self.calibrated,self.calibdata,self.shouldclear=self.pipeend.recv()
                 #print self.toplotlist
+                if self.calibrated:
+                        filecalib=open('Calibration.cal','r')
+                        intrinsic,distortion,distanceunit=pickle.load(filecalib)
+                        filecalib.close()
+                        self.intrinsic=intrinsic
+                        self.distortion=distortion        
+                        self.distanceunit=distanceunit
                 
             (self.timestamp,self.image, self.elliplist, self.connectlist)=self.dataqueue.get()
             #print "DataProtothread got task"
             resultstring=''
             string=''
-
-            temp=cv.CreateImageHeader((self.image[1],self.image[2]), cv.IPL_DEPTH_8U, 3)
-            cv.SetData(temp, self.image[0])
-            self.image=temp
-
-
 
             if self.shouldclear:
                 self.data=list()
@@ -373,8 +376,10 @@ class DataProtoProcess(multiprocessing.Process):
                     #correct position concerning cam calibration
 
                     if self.calibrated:
-                        x1,y1=self.KoordinatestoUndist(self.calibdata.intrinsic,self.calibdata.distortion,epar1.MidPos[0],epar1.MidPos[1])
-                        x2,y2=self.KoordinatestoUndist(self.calibdata.intrinsic,self.calibdata.distortion,epar2.MidPos[0],epar2.MidPos[1])
+                        #x1,y1=self.KoordinatestoUndist(self.calibdata.intrinsic,self.calibdata.distortion,epar1.MidPos[0],epar1.MidPos[1])
+                        #x2,y2=self.KoordinatestoUndist(self.calibdata.intrinsic,self.calibdata.distortion,epar2.MidPos[0],epar2.MidPos[1])
+                        x1,y1=epar1.MidPos[0],epar1.MidPos[1]
+                        x2,y2=epar2.MidPos[0],epar2.MidPos[1]
                         rx,ry=abs(x1-x2),abs(y1-y2)
                         
                     else:
@@ -397,8 +402,9 @@ class DataProtoProcess(multiprocessing.Process):
                         epar=self.GetEllipWithNum(self.elliplist,self.toplot[1])
                         #correct position concerning cam calibration
                         if self.calibrated:
-                            epar.MidPos=self.KoordinatestoUndist(self.calibdata.intrinsic,self.calibdata.distortion,epar.MidPos[0],epar.MidPos[1])
-                        
+                            #epar.MidPos=self.KoordinatestoUndist(self.calibdata.intrinsic,self.calibdata.distortion,epar.MidPos[0],epar.MidPos[1])
+                            #we undist picture
+                            pass
                         if self.toplot[2]=='MidPos x':
                             this=epar.MidPos[0]
                         if self.toplot[2]=='MidPos y':
@@ -495,21 +501,6 @@ class DataProtoProcess(multiprocessing.Process):
             return linepar
         else:
             return None
-    def KoordinatestoUndist(self,intrinsic,distortion,x,y):
-        src=cv.CreateMat(1,1,cv.CV_64FC2)
-        dst=cv.CreateMat(1,1,cv.CV_64FC2)
-        cv.Set1D(src,0,cv.Scalar(x,y,0,0));
-        new=cv.Get1D(src,0)
-        newx=new[0]
-        newy=new[1]
-        #must be camera matrix at last position to give accurate results
-        
-        cv.UndistortPoints(src,dst,intrinsic,distortion,P=intrinsic)
-        new=cv.Get1D(dst,0)
-        newx=new[0]
-        newy=new[1]
-        return newx,newy
-
 class PlotWriteThread(threading.Thread):
     """Background Worker Thread Class."""
 
@@ -531,7 +522,7 @@ class PlotWriteThread(threading.Thread):
             #print 'running'
             #update WinPlot treecontrol
 
-            plotlist,self.elliplist,self.connectlist=self.plotwritequeue.get()
+            self.plotlist,self.elliplist,self.connectlist=self.plotwritequeue.get()
             #print plotlist
 
             if len(self.parent.itemlist)!=len(self.elliplist)+len(self.connectlist):
@@ -541,14 +532,13 @@ class PlotWriteThread(threading.Thread):
                 self.parent.itemlist.extend(self.connectlist)
                 self.parent.BuildTreeCtrl()
 
-            if len(plotlist)>0:
+            if len(self.plotlist)>0:
                 panelwidth,panelheight=self.parent.panel.GetSize()
                 self.parent.plotter.SetSize(size=(panelwidth,panelheight))
-                
-                gc = plot.PlotGraphics(plotlist, '', 'Time [s]', '[pixel]')
+                #print'to gc'
+                gc = plot.PlotGraphics(self.plotlist, '', 'Time [s]', '[pixel]')
+                #print'draw'
                 self.parent.plotter.Draw(gc)
-                self.parent.plotter.SetXSpec('min')
-                self.parent.plotter.SetYSpec('min')   
-                self.parent.plotter.Redraw()
+                #print'finished'
         #self.plotwritequeue.task_done()
 
