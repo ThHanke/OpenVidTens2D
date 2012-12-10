@@ -1,13 +1,12 @@
 # -*- coding: cp1252 -*-
 import wx
 
-from time import clock
 from time import sleep
 
 import multiprocessing
 
 #globals
-import config
+#import config
 
 #modules
 import LiveCamWin
@@ -61,8 +60,6 @@ class InitFrame(wx.Frame):
     def CreateLivePlotView(self,parent,source):
         parent.LivePlotWin=LivePlotWin.LivePlotWin(source)
         source.childs.append(parent.LivePlotWin)
-
-
 
         
         

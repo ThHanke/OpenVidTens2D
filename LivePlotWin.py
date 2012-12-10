@@ -1,17 +1,15 @@
 # -*- coding: cp1252 -*-
-import wx,cv,cv2,numpy
+import wx,cv2
 import threading
 import Queue
 import multiprocessing
 
 import os
-import string
 import pickle
 
 import wx.lib.plot as plot
 
 from time import clock
-from time import sleep
 
 #import globals
 import config
@@ -37,13 +35,15 @@ class LivePlotWin(wx.Frame):
         self.stopbutton.SetBitmapSelected(wx.Image('Stopdownsmall.png', wx.BITMAP_TYPE_PNG).ConvertToBitmap())
         self.clearbutton=wx.Button(self.buttonpanel,wx.ID_ANY,'CLEAR',size=(60,28),style=wx.BU_EXACTFIT)
         
-        
+        self.checkwritevideo=wx.CheckBox(self.buttonpanel,wx.ID_ANY,'Write Video',size=(80,20),style=wx.BU_EXACTFIT)
         self.filetext=wx.TextCtrl(self.buttonpanel,wx.ID_ANY,size=(300,20),style=wx.BU_EXACTFIT)
         self.filetext.SetValue('data000.txt')
+        
         
         self.buttonsizer.Add(self.startbutton,0)
         self.buttonsizer.Add(self.stopbutton,0)
         self.buttonsizer.Add(self.clearbutton,0,wx.ALIGN_CENTER_VERTICAL)
+        self.buttonsizer.Add(self.checkwritevideo,0,wx.ALIGN_CENTER_VERTICAL)
         self.buttonsizer.Add(self.filetext,1,wx.ALIGN_CENTER_VERTICAL)
         
         self.buttonpanel.SetSizer(self.buttonsizer)
@@ -68,6 +68,7 @@ class LivePlotWin(wx.Frame):
         self.shouldclear=False
         self.filename=None
         self.fp=None
+        self.usevideowriter=False
         self.count=0
         self.called=0
         self.plotstarttime=clock()
@@ -87,11 +88,11 @@ class LivePlotWin(wx.Frame):
         self.plotwritequeue=multiprocessing.Queue(1)
         self.parentendpipe,self.childendpipe=multiprocessing.Pipe()
         #spawn pool of threads
-        t=DataProtoProcess(self.childendpipe,self.winsource.resultqueuePlot,self.plotwritequeue)
+        DataProtoProcess(self.childendpipe,self.winsource.resultqueuePlot,self.plotwritequeue)
         self.SendStatustoBackgroundProcess()
         
         #spawn pool of threads
-        t=PlotWriteThread(self,self.parentendpipe,self.plotwritequeue)
+        PlotWriteThread(self,self.parentendpipe,self.plotwritequeue)
 
         self.startbutton.Bind(wx.EVT_BUTTON, self.OnStart)
         self.stopbutton.Bind(wx.EVT_BUTTON, self.OnStop)
@@ -117,11 +118,15 @@ class LivePlotWin(wx.Frame):
         self.Layout()
         self.Show()
     def SendStatustoBackgroundProcess(self):
-        self.parentendpipe.send((self.itemlist,self.toplotlist,self.tofile,self.filename,self.winsource.calibrated,self.winsource.CalibData,self.shouldclear))
+        if self.checkwritevideo.GetValue:
+            self.usevideowriter=True
+        else:
+            self.usevideowriter=False
+        self.parentendpipe.send((self.itemlist,self.toplotlist,self.tofile,self.filename,self.usevideowriter,self.winsource.calibrated,self.winsource.CalibData,self.shouldclear))
     def OnStart(self,event):
         self.tofile=True
         self.filename=self.filetext.GetValue()
-        if os.path.isfile(self.filename):
+        while os.path.isfile(self.filename):
             self.SetStatusText('File exists allready')
             comps=self.filename.rpartition('.')
             #print len(comps[0])
@@ -146,6 +151,7 @@ class LivePlotWin(wx.Frame):
         self.SetStatusText('Capturing')
         self.capturestarttime=clock()
         #self.data=list()
+        #print 'send to background data process'
         self.SendStatustoBackgroundProcess()
         
     def WriteDataHead(self,fileinter):
@@ -208,7 +214,7 @@ class LivePlotWin(wx.Frame):
 
         if not self.tofile:
             treesel=self.tree.GetSelections()
-            print treesel
+            #print treesel
             self.toplotlist=list()
             for subitem in treesel:
                 if self.tree.ItemHasChildren(subitem ):
@@ -224,6 +230,7 @@ class LivePlotWin(wx.Frame):
                                 self.data = list()
                                 this=str(self.tree.GetItemText(parent)),int(self.tree.GetItemText(item)),str(self.tree.GetItemText(subitem))
                                 self.toplotlist.append(this)
+                
             self.SendStatustoBackgroundProcess()
             #print 'changes where send'
             
@@ -251,9 +258,9 @@ class LivePlotWin(wx.Frame):
                     c2=self.tree.AppendItem(this,'MidPos y')
                     if self.winsource.calibrated:
                         self.tree.SetItemImage(c2,0)
-                    c3=self.tree.AppendItem(this,'Size a')
-                    c4=self.tree.AppendItem(this,'Size b')
-                    c5=self.tree.AppendItem(this,'Angle')
+                    self.tree.AppendItem(this,'Size a')
+                    self.tree.AppendItem(this,'Size b')
+                    self.tree.AppendItem(this,'Angle')
                 if isinstance(self.itemlist[listpos],config.LinePar):
                     #print  "is connect"
                     par=config.LinePar()
@@ -307,25 +314,30 @@ class DataProtoProcess(multiprocessing.Process):
 ##        self.tofile=False
 ##        self.filename=None
         self.fp=None
+        self.videowriter=None
 ##        self.daemon=True
         self.itemlist=list()
         self.toplotlist=list()
         self.tofile=False
         self.calibrated=False
         self.calibdata=None
+        self.elliplist, self.connectlist=list(),list()
 
         self.colours=('BLACK','RED','BLUE','GREEN','PINK','YELLOW','CYAN','PEACHPUFF','TURQUOSE','DARKRED','DARKBLUE','DARKGREEN','IVORY','MINTCREAM','NAVY','SEAGREEN','GOLD','SALMON','MAROON','PURPLE')
-               
+             
         self.start()
+       
         
         # start the thread
     def run(self):
         #print "Aquirethread started "
         while True:
-            #get actuall data form WInPlot
+            
+
+            #print 'get actuall data form WInPlot'
             if self.pipeend.poll():
-                self.itemlist,self.toplotlist,self.tofile,self.filename,self.calibrated,self.calibdata,self.shouldclear=self.pipeend.recv()
-                #print self.toplotlist
+                self.itemlist,self.toplotlist,self.tofile,self.filename,self.usevideowriter,self.calibrated,self.calibdata,self.shouldclear=self.pipeend.recv()
+                #print self.itemlist,self.toplotlist,self.tofile,self.filename,self.calibrated,self.calibdata,self.shouldclear
                 if self.calibrated:
                         filecalib=open('Calibration.cal','r')
                         intrinsic,distortion,distanceunit=pickle.load(filecalib)
@@ -333,10 +345,17 @@ class DataProtoProcess(multiprocessing.Process):
                         self.intrinsic=intrinsic
                         self.distortion=distortion        
                         self.distanceunit=distanceunit
-                
-            (self.timestamp,self.image, self.elliplist, self.connectlist)=self.dataqueue.get()
+            
+            try:
+                (self.timestamp,self.image, self.elliplist, self.connectlist)=self.dataqueue.get(False)
+                #print self.timestamp
+            except:
+                #print 'nothing to get'
+                continue
+            
+
+               
             #print "DataProtothread got task"
-            resultstring=''
             string=''
 
             if self.shouldclear:
@@ -395,7 +414,6 @@ class DataProtoProcess(multiprocessing.Process):
                         this=c
                     temp.append((time,this))
                 if self.toplot[0]=='Ellipse':
-                    ellip=config.EllipPar()
                     if self.GetEllipWithNum(self.elliplist,self.toplot[1])== None:
                         continue
                     else:
@@ -440,23 +458,18 @@ class DataProtoProcess(multiprocessing.Process):
             if self.tofile:
                 self.fp=open(self.filename,'a',0)
                 self.fp.writelines(string+'\n')
-    ##        if self.tofile:
-    ##            self.fp.writelines(string+'\n')
-    ##            
-    ##            try:
-    ##                #scale down to 720x560
-    ##                cv.Resize(self.winsource.image,self.vidframe,cv.CV_INTER_NN)
-    ##                cv.CvtColor(self.vidframe,self.vidframe,cv.CV_RGB2BGR)
-    ##                cv.WriteFrame(self.videowriter,self.vidframe)
-    ##            except:
-    ##                pass
-##                for i in range(len(self.data)):
-##                    line = plot.PolyLine(self.data[i], colour=self.colours[i], width=1,legend=self.toplotlist[i][0]+' '+str(self.toplotlist[i][1]))
-##                    plotlist.append(line)
-##                    marker = plot.PolyMarker(self.data[i], colour=self.colours[i] ,marker='circle',width=1, size=1,legend=self.toplotlist[i][2])
-##                    plotlist.append(marker)
-##                    self.plotlist=plotlist
-                    
+
+                if self.usevideowriter:
+                    if self.videowriter==None:
+                        self.videowriter=cv2.VideoWriter(self.filename[:-3]+'avi', 842289229 ,25,(640,480)) # 859189833 for H263I,827148624 for mpeg-1,1196444237 for mjpg, 541215044 for Uncompress RGB,842289229 for mpg4.2
+                    self.videowriter.write(self.image)
+            
+            
+            else:
+                if self.videowriter!=None:
+                    self.videowriter.release()
+                    self.videowriter=None
+   
             #resultstring=resultstring+string+'\n'
 
             

@@ -1,5 +1,5 @@
 # -*- coding: cp1252 -*-
-import wx,cv,cv2,numpy
+import wx,cv2,numpy
 import threading
 
 
@@ -12,7 +12,7 @@ import multiprocessing
 #import globals
 import config
 
-from time import sleep
+#from time import sleep
 from time import clock
 
 ID_CCAL=wx.NewId()
@@ -64,13 +64,12 @@ class LiveTrackWin(wx.Frame):
         #spwan queue
 
         self.resultqueueTrack=multiprocessing.Queue(1)
-        self.resultqueuePlot=multiprocessing.Queue(1)
+        self.resultqueuePlot=multiprocessing.Queue(5)
 
         self.parentendpipe,self.childendpipe=multiprocessing.Pipe()
         
         #StartVariablen
         self.zoomval=0
-        aspect=1.0
 
         self.zoomrect=None
         self.mousein=False
@@ -90,11 +89,11 @@ class LiveTrackWin(wx.Frame):
         
         self.childs=list()
 
-        t=ProcessPicThread(self.childendpipe,self.winsource.totrackqueue,self.resultqueueTrack,self.resultqueuePlot,0)
+        ProcessPicThread(self.childendpipe,self.winsource.totrackqueue,self.resultqueueTrack,self.resultqueuePlot,0)
         #init variables in backgroundprocess
         self.SendStatustoBackgroundProcess()
 
-        t=WinTrackBmpPaintThread(self,self.resultqueueTrack,self.panel,0)
+        WinTrackBmpPaintThread(self,self.resultqueueTrack,self.panel,0)
 
         self.Show()
     def CreateMenu(self):
@@ -171,6 +170,7 @@ class LiveTrackWin(wx.Frame):
             self.rightdown=False,self.rightdown[1],pos
             #send to background process
             self.SendStatustoBackgroundProcess()
+            self.rightdown=False,(None,None),(None,None)
             #print self.rightdown
             if self.winsource.isfileinterface:
                 #print 'mouse right klicked'
@@ -189,7 +189,7 @@ class LiveTrackWin(wx.Frame):
                 if self.winsource.isfileinterface:
                     self.Replot()
     def CameraCalibration(self,event):
-        filters = 'Image files (*.gif;*.png;*.jpg;*.bmp)|*.gif;*.png;*.jpg;*.bmp'
+        #filters = 'Image files (*.gif;*.png;*.jpg;*.bmp)|*.gif;*.png;*.jpg;*.bmp'
 
         self.CalibData=CalibData()
         self.calibrated=False
@@ -217,9 +217,7 @@ class LiveTrackWin(wx.Frame):
             if answer==wx.OK:
                 temp=numpy.copy(self.imagetuple)
                 raw=cv2.cvtColor(temp,cv2.COLOR_BGR2GRAY)
-                
-                
-                paternsize=(board_w,board_h)
+
                 #print 'try to find patern'
                 found, corners=cv2.findChessboardCorners(raw, patternsize,flags=cv2.CALIB_CB_ADAPTIVE_THRESH+cv2.CALIB_CB_NORMALIZE_IMAGE)
   
@@ -248,7 +246,7 @@ class LiveTrackWin(wx.Frame):
                     
         if (detectsuccsess>0):
             rms1, intrinsic, dist_coefs, rvecs, tvecs = cv2.calibrateCamera(obj_points, img_points, (temp.shape[1], temp.shape[0]),criteria=(cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_COUNT, 300, 1E-6),flags=cv2.CALIB_FIX_ASPECT_RATIO+cv2.CALIB_ZERO_TANGENT_DIST)
-            print rms1
+            #print rms1
             self.CalibData.intrinsic=intrinsic
             self.CalibData.distortion=dist_coefs
             self.CalibData.distanceunit=19,'mm'
@@ -279,7 +277,6 @@ class LiveTrackWin(wx.Frame):
         dlg = wx.FileDialog(self, "Select file with intrinsic camera matrix", config.ProgDir, "", 'cal files (*.cal)|*.cal', wx.FD_OPEN)
         if dlg.ShowModal() == wx.ID_OK:
             filename=dlg.GetFilenames()
-            dirname=dlg.GetDirectory()
             filecalib=open(filename[0],'r')
             self.CalibData.intrinsict,self.CalibData.distortion,self.CalibData.distanceunit=pickle.load(filecalib)
             filecalib.close()
@@ -432,10 +429,11 @@ class ProcessPicThread(multiprocessing.Process):
             imagetuple=self.queue.get()
             self.timestamp=imagetuple[0]
             self.raw=numpy.copy(imagetuple[1])
-
+            
+            
             if self.pipeend.poll():
                 self.newellip,self.pickall,self.rightdown,self.seachrectfactor,self.calibrated=self.pipeend.recv()
-            #print self.newellip,self.pickall,self.rightdown,self.seachrectfactor
+                #print self.newellip,self.pickall,self.rightdown,self.seachrectfactor
                 if self.calibrated:
                     if self.intrinsic==None and self.distortion==None:
                         filecalib=open('Calibration.cal','r')
@@ -496,6 +494,7 @@ class ProcessPicThread(multiprocessing.Process):
                 self.raw=temp
         
             self.image=cv2.cvtColor(self.raw,cv2.COLOR_GRAY2RGB)
+            self.tovideo=numpy.copy(self.image)
 
             if self.pickall:
                 #print 'pick all circles through hough transform'
@@ -528,7 +527,7 @@ class ProcessPicThread(multiprocessing.Process):
 
             
             try:
-                self.out_queue2.put((self.timestamp,self.image, self.newelliplist, self.newconnectlist),False)
+                self.out_queue2.put((self.timestamp,self.tovideo, self.newelliplist, self.newconnectlist),False)
             except Queue.Full:
                 ##print 'trackresultqueue3 full'
                 pass
@@ -549,7 +548,6 @@ class ProcessPicThread(multiprocessing.Process):
         found=0
         firstsearchrectsize=5
         searchrectsize=5
-        errcount=0
         #print 'create memstorage'
         
         while found <1:
@@ -580,6 +578,8 @@ class ProcessPicThread(multiprocessing.Process):
             for contour in contours:
                 #print contour
                 if len(contour) >= 6:
+                    # because of bug in opencv 2.4.2 have to cast to int manually
+                    contour=contour.astype('int')
                     if cv2.contourArea(contour)<=(rectimage.shape[1]*rectimage.shape[0]/50)or cv2.contourArea(contour)>(rectimage.shape[1]*rectimage.shape[0]/2):
                         continue
                     #print 'process contours' 
@@ -604,6 +604,8 @@ class ProcessPicThread(multiprocessing.Process):
                     if left>searchrect[0] and low>searchrect[1] and b<searchrect[2] and h<searchrect[3] and b>searchrect[2]/3 and h>searchrect[3]/3:
                         found=1
                         #print 'found ellip'
+                        #print left,searchrect[0],low,searchrect[1],b,searchrect[2],h,searchrect[3],b,searchrect[2]/3,h,searchrect[3]/3
+                        cv2.rectangle(self.image,(searchrect[0],searchrect[1]),(int(searchrect[0]+searchrect[2]),int(searchrect[1]+searchrect[3])),(50,50,255),1)
                         EllipParnew.searchrect=searchrect
                         break
             
@@ -619,7 +621,7 @@ class ProcessPicThread(multiprocessing.Process):
     def PickAll(self,gray):
         try:
             circles=cv2.HoughCircles(gray, cv.CV_HOUGH_GRADIENT,2,int(gray.shape[1]/20), 192, 50)
-            print circles
+            #print circles
         except:
             #print 'null pointer bla bla'
             return
@@ -635,6 +637,7 @@ class ProcessPicThread(multiprocessing.Process):
     def TrackEllip(self,image,ellipses):
         
         elliplistnew=list()
+        #print len(ellipses)
         for listpos, item in enumerate(ellipses):
             #print 'track ellip'
             triedtorescue=False
@@ -656,6 +659,7 @@ class ProcessPicThread(multiprocessing.Process):
 
             #print 'finish init %(listpos)d in frame %(framenum)d ' % vars()
             rectimage, searchrect=self.GetSearchCounturImage(image,searchrecttr)
+            #print searchrect,searchrecttr
             #print rectimage, searchrect
 
             if rectimage==None:
@@ -666,8 +670,12 @@ class ProcessPicThread(multiprocessing.Process):
             found=0
             for contour in contours:
                 #print contour
-                if len(contour) >= 6:
+                #print len(contour)
+                if len(contour) >= 6 :
+                    # because of bug in opencv 2.4.2 have to cast to int manually
+                    contour=contour.astype('int')
                     if cv2.contourArea(contour)<=(rectimage.shape[1]*rectimage.shape[0]/50)or cv2.contourArea(contour)>(rectimage.shape[1]*rectimage.shape[0]/2):
+                        #print 'kicked'
                         continue
                     
                     # Fits ellipse to current contour.
@@ -689,9 +697,9 @@ class ProcessPicThread(multiprocessing.Process):
 
                     left=int(EllipParnew.MidPos[0]-b/2)
                     low=int(EllipParnew.MidPos[1]-h/2)
-                    
-
-                    if left>searchrect[0] and low>searchrect[1] and b<searchrect[2] and h<searchrect[3] and b>searchrect[2]/3 and h>searchrect[3]/3:
+               
+                    #print left,searchrect[0],low,searchrect[1],b,searchrect[2],h,searchrect[3],b,searchrect[2]/3,h,searchrect[3]/3
+                    if left>searchrect[0] and low>searchrect[1] and b<searchrect[2] and h<searchrect[3] and b>searchrect[2]/5 and h>searchrect[3]/5:
                         found=1
                         cv2.rectangle(self.image,(searchrecttr[0],searchrecttr[1]),(int(searchrecttr[0]+searchrecttr[2]),int(searchrecttr[1]+searchrecttr[3])),(0,0,255),1)
                         #print found
@@ -724,6 +732,8 @@ class ProcessPicThread(multiprocessing.Process):
                         for contour in contours:
                         #print contour
                             if len(contour) >= 6:
+                                # because of bug in opencv 2.4.2 have to cast to int manually
+                                contour=contour.astype('int')
                                 if cv2.contourArea(contour)<=(rectimage.shape[1]*rectimage.shape[0]/50)or cv2.contourArea(contour)>(rectimage.shape[1]*rectimage.shape[0]/2):
                                     continue
                                 
@@ -746,7 +756,7 @@ class ProcessPicThread(multiprocessing.Process):
                                 low=int(EllipParnew.MidPos[1]-h/2)
                                 
 
-                                if left>searchrect[0] and low>searchrect[1] and b<searchrect[2] and h<searchrect[3] and b>searchrect[2]/3 and h>searchrect[3]/3:
+                                if left>searchrect[0] and low>searchrect[1] and b<searchrect[2] and h<searchrect[3] and b>searchrect[2]/5 and h>searchrect[3]/5:
                                     cv2.rectangle(self.image,(searchrecttr[0],searchrecttr[1]),(int(searchrecttr[0]+searchrecttr[2]),int(searchrecttr[1]+searchrecttr[3])),(0,255,0),1)
                                     found=1
                                     EllipParnew.searchrect=searchrect
@@ -799,12 +809,12 @@ class ProcessPicThread(multiprocessing.Process):
     def RescueList(self,searchrect,mov):
         #make searchrect bigger and move around
         rectlist=list()
-        factors=range(1,3)
-        bfactors=range(1,3)
+        factors=range(1,5)
+        bfactors=range(1,5)
 
         for factor in factors:
-            #teilen=12
-            teilen=8
+            teilen=12
+            #teilen=8
             for bfactor in bfactors:
 
                 radius=(searchrect[2]+searchrect[3])/20.0*bfactor
@@ -860,23 +870,28 @@ class ProcessPicThread(multiprocessing.Process):
             temp=cv2.medianBlur(temp,3)
             thresimg=cv2.resize(temp,(temp.shape[1]*5,temp.shape[0]*5),interpolation=cv2.INTER_CUBIC)
 
-            ret,thresimg=cv2.threshold(thresimg,0,255,cv2.THRESH_OTSU)
+            ret,thresimg=cv2.threshold(thresimg,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+            #pixin, pixout=self.InOutVal(thresimg)
+            #ret,thresimg=cv2.threshold(thresimg,int((pixin+pixout)/2),255,cv2.THRESH_BINARY)
             #print 'return subimage'
             return thresimg, rect
     def InOutVal(self,img):
 
         pixout=0
         pixin=0
+        width=img.shape[1]
+        height=img.shape[0]
         
         pixout=(img[0,0]+img[0,1]+img[1,0]
-                 +img[0,img.width-1]+img[1,img.width-1]+img[0,img.width-2]
-                 +img[img.height-1,0]+img[img.height-2,0]+img[img.height-1,1]
-                 +img[img.height-1,img.width-1]+img[img.height-2,img.width-1]+img[img.height-1,img.width-2])
+                 +img[0,width-1]+img[1,width-1]+img[0,width-2]
+                 +img[height-1,0]+img[height-2,0]+img[height-1,1]
+                 +img[height-1,width-1]+img[height-2,width-1]+img[height-1,width-2])
         pixout=pixout/12
 
         
-        pixin=img[int(img.height/2),int(img.width/2)]+img[int(img.height/2)+1,int(img.width/2)]+img[int(img.height/2),int(img.width/2)+1]+img[int(img.height/2)+1,int(img.width/2)+1]
+        pixin=img[int(height/2),int(width/2)]+img[int(height/2)+1,int(width/2)]+img[int(height/2),int(width/2)+1]+img[int(height/2)+1,int(width/2)+1]
         pixin=pixin/4
+        #print pixout,pixin
         return pixout,pixin
     def NumEllip(self, elliplist):
         posiblenum=range(len(elliplist)+10)
@@ -1098,17 +1113,6 @@ class WinTrackBmpPaintThread(threading.Thread):
 
             cv2.line(image,(int(P5[0]),int(P5[1])),(int(P2[0]),int(P2[1])),(color1,255,color3),thickness)
 
-            P3=P1[0]-9*math.cos(angle+math.pi/4),P1[1]-9*math.sin(angle+math.pi/4)  
-            P4=P1[0]-9*math.cos(angle-math.pi/4),P1[1]-9*math.sin(angle-math.pi/4)
-  
-            #print angle,lenght
-        
-##            cv.FillPoly(image,
-##                        [[(int(P3[0]),int(P3[1])),
-##                         (int(P1[0]),int(P1[1])),
-##                         (int(P4[0]),int(P4[1]))]],
-##                        cv.CV_RGB(color1,255,color3),
-##                        8,0)
       
     def GetEllipWithNum(self,liste,num):
         found=False

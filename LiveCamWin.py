@@ -1,11 +1,9 @@
 
-import wx,cv,cv2,numpy,ctypes,os
+import wx,cv2,numpy,os
 import threading
 import Queue
 import VideoCapture
-import ImageChops
 
-from PIL import Image
 
 import multiprocessing
 
@@ -105,7 +103,7 @@ class LiveCamWin(wx.Frame):
     def CleanUpBeforeInterfaceSwitch(self):
         if isinstance(self.caminterface,VideoCapture.Device):
             #print 'stop aquiring'
-            self.aquirequeue.put((self,None,False),False)
+            self.aquirequeue.put((0,None,True),False)
             #print 'stopped aquiring'
             del self.caminterface
             self.caminterface=None
@@ -147,6 +145,7 @@ class LiveCamWin(wx.Frame):
             for i in range(0,2):
                 try:
                     self.caminterface = VideoCapture.Device(i)
+                    print self.caminterface
                     break
                 except:
                     self.caminterface=None
@@ -156,12 +155,12 @@ class LiveCamWin(wx.Frame):
         else:          
             try:
                 self.caminterface = VideoCapture.Device(num)
-                #print self.caminterface
+                print self.caminterface
             except:
                 self.caminterface=None
                 return False
-
-        self.ScaledImg=cv.CreateImage((100,100),8,3)
+        
+        #self.ScaledImg=cv.CreateImage((100,100),8,3)
         
         self.panel=wx.Panel(self, wx.ID_ANY, style=wx.BORDER_SUNKEN)
         self.panelsizer=wx.BoxSizer(wx.HORIZONTAL)
@@ -172,15 +171,15 @@ class LiveCamWin(wx.Frame):
         self.CreateMenu()
         
 
-        t=VidCapQueuePicThread(self.aquirequeue,self.bmppaintqueue,self.totrackqueue,0)
-        t=WinCamBmpPaintThread(self.bmppaintqueue,self.panel)
+        VidCapQueuePicThread(self.aquirequeue,self.bmppaintqueue,self.totrackqueue,0)
+        WinCamBmpPaintThread(self.bmppaintqueue,self.panel)
             
                 
 
         #print threading.enumerate()
 
 
-        #print 'start aquiring'
+        print 'start aquiring'
         self.aquirequeue.put((self,self.caminterface,False),False)
         return True
     def VidCapSetCamera(self,event):
@@ -319,7 +318,7 @@ class LiveCamWin(wx.Frame):
 
 
         self.dirname=config.ProgDir
-        self.ScaledImg=cv.CreateImage((100,100),8,3)
+        #self.ScaledImg=cv.CreateImage((100,100),8,3)
 
         
         
@@ -347,8 +346,8 @@ class LiveCamWin(wx.Frame):
         self.SetSizer(self.panelsizer)
 
         self.gothrough=False
-        t=QueuePicThread(self.aquirequeue,self.bmppaintqueue,self.totrackqueue)
-        t=WinCamBmpPaintThread(self.bmppaintqueue,self.panel)
+        QueuePicThread(self.aquirequeue,self.bmppaintqueue,self.totrackqueue)
+        WinCamBmpPaintThread(self.bmppaintqueue,self.panel)
 
 
         self.Layout()
@@ -478,7 +477,9 @@ class QueuePicThread(threading.Thread):
         #print "Aquirethread started "
         while True:
             #print self.aquirequeue.queue
-            (self.timestamp, image, plsexit)=self.aquirequeue.get()
+            data=self.aquirequeue.get()
+            print data
+            (self.timestamp, image, plsexit)=data
             if plsexit:
                 #print 'return'
                 return
@@ -554,7 +555,7 @@ class VidCapQueuePicThread(threading.Thread):
                     np_temp=numpy.reshape(temp_np, (rawdata[2],rawdata[1],3))
                     temp_np=cv2.flip(np_temp,0)
                     temp_np=cv2.cvtColor(temp_np,cv2.COLOR_BGR2RGB)
-                    self.gray=cv2.cvtColor(temp_np,cv.CV_RGB2GRAY)
+                    self.gray=cv2.cvtColor(temp_np,cv2.COLOR_RGB2GRAY)
 
                     try:
                         #self.totrackqueue.put((self.timestamp,(self.raw.tostring(),self.raw.width,self.raw.height)),False)
@@ -582,7 +583,7 @@ class WinCamBmpPaintThread(threading.Thread):
         self.panel=panel
  
 
-        self.ScaledImg=cv.CreateImage((100,100),8,3)
+        #self.ScaledImg=cv.CreateImage((100,100),8,3)
         #self.setDaemon(True)
         self.start()
         # start the thread
