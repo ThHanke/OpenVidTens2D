@@ -14,6 +14,7 @@ excludes = ['_gtkagg', '_tkagg', 'bsddb', 'curses', 'email', 'pywin.debugger',
 packages = []
 #dll_excludes = ['libgdk-win32-2.0-0.dll', 'libgobject-2.0-0.dll', 'tcl84.dll','tk84.dll']
 dll_excludes = ['MSVCR80.dll','MSVCP80.dll','MSVCR90.dll','MSVCP90.dll','vcomp.dll']
+dll_excludes = list()
 
 setup(data_files = [('', ['calicon.png',
                           'logoOpenVidTens.png',
@@ -29,12 +30,12 @@ setup(data_files = [('', ['calicon.png',
                                                 
                           ])],
 
-      options = {"py2exe": {"compressed": 1,"optimize": 1,
+      options = {"py2exe": {"compressed": 0,"optimize": 0,
                             "includes": includes,
                             "excludes": excludes,
                             "packages": packages,
                             "dll_excludes": dll_excludes,
-                            "bundle_files": 1,
+                            "bundle_files": 3,
                             "dist_dir": "64bit",
                             "xref": False,
                             

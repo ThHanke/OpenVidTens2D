@@ -5,9 +5,6 @@ import Queue
 import VideoCapture
 
 
-import multiprocessing
-
-
 from time import clock
 from time import sleep
 
@@ -25,7 +22,7 @@ ID_LFOLDER=wx.NewId()
 ID_GOTHROUGH=wx.NewId()
 
 class LiveCamWin(wx.Frame):
-    def __init__(self):
+    def __init__(self,totrackqueue,pipetotrack):
         screensize=wx.Display().GetGeometry()
         wx.Frame.__init__(self,None,wx.ID_ANY,title='LiveCamWin',pos=(0,0),size=(screensize[2]/2,screensize[3]/2),style= wx.DEFAULT_FRAME_STYLE )
         self.status=self.CreateStatusBar()
@@ -40,7 +37,8 @@ class LiveCamWin(wx.Frame):
         self.datatoqueue=list()
 
         self.aquirequeue=Queue.Queue(1)
-        self.totrackqueue=multiprocessing.Queue(1)
+        self.totrackqueue=totrackqueue
+        self.pipetotrack=pipetotrack
         self.bmppaintqueue=Queue.LifoQueue(1)
 
         self.lasttime=0
@@ -50,7 +48,9 @@ class LiveCamWin(wx.Frame):
         self.childs=list()
         self.panel=None
         
-        
+        self.pollpipetotracktimer=wx.Timer(self)
+        self.Bind(wx.EVT_TIMER,self.PollPipeToTrack,self.pollpipetotracktimer)
+        self.pollpipetotracktimer.Start(20)
         
 
         if self.InitVidCapCamera():
@@ -100,6 +100,13 @@ class LiveCamWin(wx.Frame):
             self.Bind(wx.EVT_MENU, self.GoThrough, id=ID_GOTHROUGH)
 
         self.SetMenuBar(self.Menubar)
+    def PollPipeToTrack(self,event):
+        if self.pipetotrack.poll():
+            result=self.pipetotrack.recv()
+            print result
+            if result=='Replot':
+                if self.isfileinterface:
+                    self.OnSlider(True,self.imageslider.GetValue())
     def CleanUpBeforeInterfaceSwitch(self):
         if isinstance(self.caminterface,VideoCapture.Device):
             #print 'stop aquiring'
@@ -145,6 +152,7 @@ class LiveCamWin(wx.Frame):
             for i in range(0,2):
                 try:
                     self.caminterface = VideoCapture.Device(i)
+                    self.caminterface.setResolution(1000,1000)
                     break
                 except:
                     self.caminterface=None
@@ -434,11 +442,12 @@ class LiveCamWin(wx.Frame):
     def GotoNextFile(self,event):
         #print 'go to next file'
         if self.gothrough:
-            if self.imageslider.GetValue()<self.imageslider.GetMax():
-                self.OnSlider(True,self.imageslider.GetValue()+1)
-                #self.aquirequeue.join()
-            else:
-                self.gothrough=False
+            if self.aquirequeue.empty():
+                if self.imageslider.GetValue()<self.imageslider.GetMax():
+                    self.OnSlider(True,self.imageslider.GetValue()+1)
+                    #self.aquirequeue.join()
+                else:
+                    self.gothrough=False
             
         
     def GoThrough(self,event):
@@ -479,7 +488,7 @@ class QueuePicThread(threading.Thread):
             (self.timestamp, image, plsexit)=self.aquirequeue.get()
             if plsexit:
                 #print 'return'
-                return
+                break
             #print "Aquirethread got task"
             
 
@@ -530,8 +539,7 @@ class VidCapQueuePicThread(threading.Thread):
                 (parent,self.caminterface,plsexit) =self.aquirequeue.get()
                 
             if plsexit:
-                #print 'return'
-                return
+                break
 
             if self.caminterface is not None:
                 rawdata=self.caminterface.getBuffer()  #datastring, width, height

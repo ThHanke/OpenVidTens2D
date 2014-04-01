@@ -15,8 +15,9 @@ from time import clock
 import config
 
 class LivePlotWin(wx.Frame):
-    def __init__(self,source):
-        self.winsource=source
+    def __init__(self,trackresultqueue,pipetotrack):
+        self.trackresultqueue=trackresultqueue
+        self.pipetotrack=pipetotrack
         screensize=wx.Display().GetGeometry()
         wx.Frame.__init__(self,None,wx.ID_ANY,title='LivePlotWin',pos=(0,screensize[3]/2),size=(screensize[2]/2,screensize[3]/2),style= wx.DEFAULT_FRAME_STYLE ^ wx.CLOSE_BOX )
         self.status=self.CreateStatusBar()
@@ -85,7 +86,7 @@ class LivePlotWin(wx.Frame):
         self.plotwritequeue=multiprocessing.Queue(1)
         self.parentendpipe,self.childendpipe=multiprocessing.Pipe()
         #spawn pool of threads
-        DataProtoProcess(self.childendpipe,self.winsource.resultqueuePlot,self.plotwritequeue)
+        DataProtoProcess(self.childendpipe,self.trackresultqueue,self.plotwritequeue)
         self.SendStatustoBackgroundProcess()
         
         #spawn pool of threads
@@ -115,8 +116,9 @@ class LivePlotWin(wx.Frame):
         self.Layout()
         self.Show()
     def SendStatustoBackgroundProcess(self):
-        self.parentendpipe.send((self.itemlist,self.toplotlist,self.tofile,self.filename,self.winsource.calibrated,self.winsource.CalibData,self.shouldclear))
+        self.parentendpipe.send((self.itemlist,self.toplotlist,self.tofile,self.filename,self.shouldclear))
     def OnStart(self,event):
+        
         self.tofile=True
         self.filename=self.filetext.GetValue()
         if os.path.isfile(self.filename):
@@ -142,6 +144,7 @@ class LivePlotWin(wx.Frame):
        
         self.WriteDataHead(self.fp)
         self.SetStatusText('Capturing - freezing Selection ')
+        self.pipetotrack.send(('Capturing',self.filename))
         self.capturestarttime=clock()
         #self.data=list()
         #print 'send to background data process'
@@ -158,17 +161,13 @@ class LivePlotWin(wx.Frame):
         fileinter.writelines(string+'\n')
         
     def OnStop(self,event):
-        
+        self.pipetotrack.send('Stopped Capturing')
         self.tofile=False
         if self.fp!=None:
             self.fp.close()
 
         self.SendStatustoBackgroundProcess()
         
-        try:
-            del self.videowriter
-        except:
-            pass
         self.fp=None
         self.SetStatusText('Stopped Capturing')
     def OnClear(self,event):
@@ -230,9 +229,6 @@ class LivePlotWin(wx.Frame):
 
     def BuildTreeCtrl(self):
 
-        if self.winsource.winsource.isfileinterface:
-            if self.winsource.winsource.gothrough:
-                self.winsource.winsource.gothrough=False
         
         self.tree.DeleteAllItems()
         Element = self.tree.AddRoot('Element')
@@ -245,12 +241,9 @@ class LivePlotWin(wx.Frame):
                     Ellipse=self.tree.AppendItem(Element,'Ellipse')
                     this=self.tree.AppendItem(Ellipse,str(par.Num))
                     c1=self.tree.AppendItem(this,'MidPos x')
-                    if self.winsource.calibrated:
-                        
-                        self.tree.SetItemImage(c1,0)
+
                     c2=self.tree.AppendItem(this,'MidPos y')
-                    if self.winsource.calibrated:
-                        self.tree.SetItemImage(c2,0)
+
                     self.tree.AppendItem(this,'Size a')
                     self.tree.AppendItem(this,'Size b')
                     self.tree.AppendItem(this,'Angle')
@@ -261,14 +254,11 @@ class LivePlotWin(wx.Frame):
                     Connection=self.tree.AppendItem(Element,'Connection')
                     this=self.tree.AppendItem(Connection,str(par.Num))
                     c1=self.tree.AppendItem(this,'Range x')
-                    if self.winsource.calibrated:
-                        self.tree.SetItemImage(c1,0)
+
                     c2=self.tree.AppendItem(this,'Range y')
-                    if self.winsource.calibrated:
-                        self.tree.SetItemImage(c2,0)
+
                     c3=self.tree.AppendItem(this,'Lenght')
-                    if self.winsource.calibrated:
-                        self.tree.SetItemImage(c3,0)
+
                     #print len(self.itemlist),len(elliplist),len(connectlist)
         self.RecallTreeSelection()
         self.tree.ExpandAll()
@@ -311,8 +301,7 @@ class DataProtoProcess(multiprocessing.Process):
         self.itemlist=list()
         self.toplotlist=list()
         self.tofile=False
-        self.calibrated=False
-        self.calibdata=None
+
         self.elliplist, self.connectlist=list(),list()
 
         self.colours=('BLACK','RED','BLUE','GREEN','PINK','YELLOW','CYAN','PEACHPUFF','TURQUOSE','DARKRED','DARKBLUE','DARKGREEN','IVORY','MINTCREAM','NAVY','SEAGREEN','GOLD','SALMON','MAROON','PURPLE')
@@ -328,16 +317,9 @@ class DataProtoProcess(multiprocessing.Process):
 
             #print 'get actuall data form WInPlot'
             if self.pipeend.poll():
-                self.itemlist,self.toplotlist,self.tofile,self.filename,self.calibrated,self.calibdata,self.shouldclear=self.pipeend.recv()
+                self.itemlist,self.toplotlist,self.tofile,self.filename,self.shouldclear=self.pipeend.recv()
                 #print self.itemlist,self.toplotlist,self.tofile,self.filename,self.calibrated,self.calibdata,self.shouldclear
-                if self.calibrated:
-                        filecalib=open('Calibration.cal','r')
-                        intrinsic,distortion,distanceunit=pickle.load(filecalib)
-                        filecalib.close()
-                        self.intrinsic=intrinsic
-                        self.distortion=distortion        
-                        self.distanceunit=distanceunit
-            
+           
             try:
                 (self.timestamp,self.image, self.elliplist, self.connectlist)=self.dataqueue.get(False)
                 #print self.timestamp
@@ -384,17 +366,7 @@ class DataProtoProcess(multiprocessing.Process):
                         epar1=self.GetEllipWithNum(self.elliplist,linepar.Pt1)
                         epar2=self.GetEllipWithNum(self.elliplist,linepar.Pt2)
 
-                    #correct position concerning cam calibration
-
-                    if self.calibrated:
-                        #x1,y1=self.KoordinatestoUndist(self.calibdata.intrinsic,self.calibdata.distortion,epar1.MidPos[0],epar1.MidPos[1])
-                        #x2,y2=self.KoordinatestoUndist(self.calibdata.intrinsic,self.calibdata.distortion,epar2.MidPos[0],epar2.MidPos[1])
-                        x1,y1=epar1.MidPos[0],epar1.MidPos[1]
-                        x2,y2=epar2.MidPos[0],epar2.MidPos[1]
-                        rx,ry=abs(x1-x2),abs(y1-y2)
-                        
-                    else:
-                        rx,ry=abs(epar1.MidPos[0]-epar2.MidPos[0]),abs(epar1.MidPos[1]-epar2.MidPos[1])
+                    rx,ry=abs(epar1.MidPos[0]-epar2.MidPos[0]),abs(epar1.MidPos[1]-epar2.MidPos[1])
                     
                         
                     c=(rx**2.0+ry**2.0)**0.5
@@ -411,10 +383,7 @@ class DataProtoProcess(multiprocessing.Process):
                     else:
                         epar=self.GetEllipWithNum(self.elliplist,self.toplot[1])
                         #correct position concerning cam calibration
-                        if self.calibrated:
-                            #epar.MidPos=self.KoordinatestoUndist(self.calibdata.intrinsic,self.calibdata.distortion,epar.MidPos[0],epar.MidPos[1])
-                            #we undist picture
-                            pass
+
                         if self.toplot[2]=='MidPos x':
                             this=epar.MidPos[0]
                         if self.toplot[2]=='MidPos y':
@@ -450,23 +419,7 @@ class DataProtoProcess(multiprocessing.Process):
             if self.tofile:
                 self.fp=open(self.filename,'a',0)
                 self.fp.writelines(string+'\n')
-    ##        if self.tofile:
-    ##            self.fp.writelines(string+'\n')
-    ##            
-    ##            try:
-    ##                #scale down to 720x560
-    ##                cv.Resize(self.winsource.image,self.vidframe,cv.CV_INTER_NN)
-    ##                cv.CvtColor(self.vidframe,self.vidframe,cv.CV_RGB2BGR)
-    ##                cv.WriteFrame(self.videowriter,self.vidframe)
-    ##            except:
-    ##                pass
-##                for i in range(len(self.data)):
-##                    line = plot.PolyLine(self.data[i], colour=self.colours[i], width=1,legend=self.toplotlist[i][0]+' '+str(self.toplotlist[i][1]))
-##                    plotlist.append(line)
-##                    marker = plot.PolyMarker(self.data[i], colour=self.colours[i] ,marker='circle',width=1, size=1,legend=self.toplotlist[i][2])
-##                    plotlist.append(marker)
-##                    self.plotlist=plotlist
-                    
+
             #resultstring=resultstring+string+'\n'
 
             

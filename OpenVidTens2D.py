@@ -38,28 +38,30 @@ class InitFrame(wx.Frame):
         
         #try to init camera
         self.status.SetStatusText('Init Camera Interface')
-        self.CreateLiveCamView(parent)
+        #define pic to trac queue
+        self.totrackqueue=multiprocessing.Queue(1)
+        #creat pipe to interact
+        self.camtotrack,self.tracktocam=multiprocessing.Pipe()
+        parent.LiveCamWin=LiveCamWin.LiveCamWin(self.totrackqueue,self.camtotrack)
         self.status.progressbar.SetValue(33)
         #init tracking module 
         self.status.SetStatusText('Init Tracking Module ')
-        self.CreateLiveTrackView(parent,parent.LiveCamWin)
+        self.trackresultqueue=multiprocessing.Queue(5)
+        self.tracktoplot,self.plottotrack=multiprocessing.Pipe()
+        parent.LiveTrackWin=LiveTrackWin.LiveTrackWin(self.totrackqueue,self.trackresultqueue,self.tracktocam,self.tracktoplot)
+        parent.LiveCamWin.childs.append(parent.LiveTrackWin)
         self.status.progressbar.SetValue(66)
         #init dataplotting module 
         self.status.SetStatusText('Init Data Aquisition Module ')
-        self.CreateLivePlotView(parent,parent.LiveTrackWin)
+        parent.LivePlotWin=LivePlotWin.LivePlotWin(self.trackresultqueue,self.plottotrack)
+        parent.LiveTrackWin.childs.append(parent.LivePlotWin)
+
         self.status.progressbar.SetValue(100)
         
         self.status.SetStatusText('Initilization succeeded')
         sleep(0.1)
         self.Destroy()
-    def CreateLiveCamView(self,parent):
-        parent.LiveCamWin=LiveCamWin.LiveCamWin()
-    def CreateLiveTrackView(self,parent,source):
-        parent.LiveTrackWin=LiveTrackWin.LiveTrackWin(source)
-        source.childs.append(parent.LiveTrackWin)
-    def CreateLivePlotView(self,parent,source):
-        parent.LivePlotWin=LivePlotWin.LivePlotWin(source)
-        source.childs.append(parent.LivePlotWin)
+
 
         
         
