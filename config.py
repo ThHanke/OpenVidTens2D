@@ -1,6 +1,7 @@
 # -*- coding: cp1252 -*-
 import wx,os,sys
 
+
 ProgDir=os.path.dirname(sys.argv[0])
 
 

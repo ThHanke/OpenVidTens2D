@@ -1,5 +1,5 @@
 # -*- coding: cp1252 -*-
-import wx,cv2
+import wx
 import threading
 import Queue
 import multiprocessing
@@ -35,15 +35,13 @@ class LivePlotWin(wx.Frame):
         self.stopbutton.SetBitmapSelected(wx.Image('Stopdownsmall.png', wx.BITMAP_TYPE_PNG).ConvertToBitmap())
         self.clearbutton=wx.Button(self.buttonpanel,wx.ID_ANY,'CLEAR',size=(60,28),style=wx.BU_EXACTFIT)
         
-        self.checkwritevideo=wx.CheckBox(self.buttonpanel,wx.ID_ANY,'Write Video',size=(80,20),style=wx.BU_EXACTFIT)
+        
         self.filetext=wx.TextCtrl(self.buttonpanel,wx.ID_ANY,size=(300,20),style=wx.BU_EXACTFIT)
         self.filetext.SetValue('data000.txt')
-        
         
         self.buttonsizer.Add(self.startbutton,0)
         self.buttonsizer.Add(self.stopbutton,0)
         self.buttonsizer.Add(self.clearbutton,0,wx.ALIGN_CENTER_VERTICAL)
-        self.buttonsizer.Add(self.checkwritevideo,0,wx.ALIGN_CENTER_VERTICAL)
         self.buttonsizer.Add(self.filetext,1,wx.ALIGN_CENTER_VERTICAL)
         
         self.buttonpanel.SetSizer(self.buttonsizer)
@@ -68,7 +66,6 @@ class LivePlotWin(wx.Frame):
         self.shouldclear=False
         self.filename=None
         self.fp=None
-        self.usevideowriter=False
         self.count=0
         self.called=0
         self.plotstarttime=clock()
@@ -118,15 +115,11 @@ class LivePlotWin(wx.Frame):
         self.Layout()
         self.Show()
     def SendStatustoBackgroundProcess(self):
-        if self.checkwritevideo.GetValue:
-            self.usevideowriter=True
-        else:
-            self.usevideowriter=False
-        self.parentendpipe.send((self.itemlist,self.toplotlist,self.tofile,self.filename,self.usevideowriter,self.winsource.calibrated,self.winsource.CalibData,self.shouldclear))
+        self.parentendpipe.send((self.itemlist,self.toplotlist,self.tofile,self.filename,self.winsource.calibrated,self.winsource.CalibData,self.shouldclear))
     def OnStart(self,event):
         self.tofile=True
         self.filename=self.filetext.GetValue()
-        while os.path.isfile(self.filename):
+        if os.path.isfile(self.filename):
             self.SetStatusText('File exists allready')
             comps=self.filename.rpartition('.')
             #print len(comps[0])
@@ -148,7 +141,7 @@ class LivePlotWin(wx.Frame):
         self.fp=open(self.filename,'w',0)
        
         self.WriteDataHead(self.fp)
-        self.SetStatusText('Capturing')
+        self.SetStatusText('Capturing - freezing Selection ')
         self.capturestarttime=clock()
         #self.data=list()
         #print 'send to background data process'
@@ -314,7 +307,6 @@ class DataProtoProcess(multiprocessing.Process):
 ##        self.tofile=False
 ##        self.filename=None
         self.fp=None
-        self.videowriter=None
 ##        self.daemon=True
         self.itemlist=list()
         self.toplotlist=list()
@@ -336,7 +328,7 @@ class DataProtoProcess(multiprocessing.Process):
 
             #print 'get actuall data form WInPlot'
             if self.pipeend.poll():
-                self.itemlist,self.toplotlist,self.tofile,self.filename,self.usevideowriter,self.calibrated,self.calibdata,self.shouldclear=self.pipeend.recv()
+                self.itemlist,self.toplotlist,self.tofile,self.filename,self.calibrated,self.calibdata,self.shouldclear=self.pipeend.recv()
                 #print self.itemlist,self.toplotlist,self.tofile,self.filename,self.calibrated,self.calibdata,self.shouldclear
                 if self.calibrated:
                         filecalib=open('Calibration.cal','r')
@@ -458,18 +450,23 @@ class DataProtoProcess(multiprocessing.Process):
             if self.tofile:
                 self.fp=open(self.filename,'a',0)
                 self.fp.writelines(string+'\n')
-
-                if self.usevideowriter:
-                    if self.videowriter==None:
-                        self.videowriter=cv2.VideoWriter(self.filename[:-3]+'avi', 842289229 ,25,(640,480)) # 859189833 for H263I,827148624 for mpeg-1,1196444237 for mjpg, 541215044 for Uncompress RGB,842289229 for mpg4.2
-                    self.videowriter.write(self.image)
-            
-            
-            else:
-                if self.videowriter!=None:
-                    self.videowriter.release()
-                    self.videowriter=None
-   
+    ##        if self.tofile:
+    ##            self.fp.writelines(string+'\n')
+    ##            
+    ##            try:
+    ##                #scale down to 720x560
+    ##                cv.Resize(self.winsource.image,self.vidframe,cv.CV_INTER_NN)
+    ##                cv.CvtColor(self.vidframe,self.vidframe,cv.CV_RGB2BGR)
+    ##                cv.WriteFrame(self.videowriter,self.vidframe)
+    ##            except:
+    ##                pass
+##                for i in range(len(self.data)):
+##                    line = plot.PolyLine(self.data[i], colour=self.colours[i], width=1,legend=self.toplotlist[i][0]+' '+str(self.toplotlist[i][1]))
+##                    plotlist.append(line)
+##                    marker = plot.PolyMarker(self.data[i], colour=self.colours[i] ,marker='circle',width=1, size=1,legend=self.toplotlist[i][2])
+##                    plotlist.append(marker)
+##                    self.plotlist=plotlist
+                    
             #resultstring=resultstring+string+'\n'
 
             

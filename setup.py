@@ -29,12 +29,12 @@ setup(data_files = [('', ['calicon.png',
                                                 
                           ])],
 
-      options = {"py2exe": {"compressed": 0,"optimize": 0,
+      options = {"py2exe": {"compressed": 1,"optimize": 1,
                             "includes": includes,
                             "excludes": excludes,
                             "packages": packages,
                             "dll_excludes": dll_excludes,
-                            "bundle_files": 3,
+                            "bundle_files": 1,
                             "dist_dir": "64bit",
                             "xref": False,
                             

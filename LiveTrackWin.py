@@ -1,5 +1,5 @@
 # -*- coding: cp1252 -*-
-import wx,cv2,numpy
+import wx,cv,cv2,numpy
 import threading
 
 
@@ -246,7 +246,7 @@ class LiveTrackWin(wx.Frame):
                     
         if (detectsuccsess>0):
             rms1, intrinsic, dist_coefs, rvecs, tvecs = cv2.calibrateCamera(obj_points, img_points, (temp.shape[1], temp.shape[0]),criteria=(cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_COUNT, 300, 1E-6),flags=cv2.CALIB_FIX_ASPECT_RATIO+cv2.CALIB_ZERO_TANGENT_DIST)
-            #print rms1
+            print rms1
             self.CalibData.intrinsic=intrinsic
             self.CalibData.distortion=dist_coefs
             self.CalibData.distanceunit=19,'mm'
@@ -430,7 +430,6 @@ class ProcessPicThread(multiprocessing.Process):
             self.timestamp=imagetuple[0]
             self.raw=numpy.copy(imagetuple[1])
             
-            
             if self.pipeend.poll():
                 self.newellip,self.pickall,self.rightdown,self.seachrectfactor,self.calibrated=self.pipeend.recv()
                 #print self.newellip,self.pickall,self.rightdown,self.seachrectfactor
@@ -494,7 +493,6 @@ class ProcessPicThread(multiprocessing.Process):
                 self.raw=temp
         
             self.image=cv2.cvtColor(self.raw,cv2.COLOR_GRAY2RGB)
-            self.tovideo=numpy.copy(self.image)
 
             if self.pickall:
                 #print 'pick all circles through hough transform'
@@ -527,7 +525,7 @@ class ProcessPicThread(multiprocessing.Process):
 
             
             try:
-                self.out_queue2.put((self.timestamp,self.tovideo, self.newelliplist, self.newconnectlist),False)
+                self.out_queue2.put((self.timestamp,self.image, self.newelliplist, self.newconnectlist),False)
             except Queue.Full:
                 ##print 'trackresultqueue3 full'
                 pass
@@ -578,8 +576,6 @@ class ProcessPicThread(multiprocessing.Process):
             for contour in contours:
                 #print contour
                 if len(contour) >= 6:
-                    # because of bug in opencv 2.4.2 have to cast to int manually
-                    contour=contour.astype('int')
                     if cv2.contourArea(contour)<=(rectimage.shape[1]*rectimage.shape[0]/50)or cv2.contourArea(contour)>(rectimage.shape[1]*rectimage.shape[0]/2):
                         continue
                     #print 'process contours' 
@@ -621,7 +617,7 @@ class ProcessPicThread(multiprocessing.Process):
     def PickAll(self,gray):
         try:
             circles=cv2.HoughCircles(gray, cv.CV_HOUGH_GRADIENT,2,int(gray.shape[1]/20), 192, 50)
-            #print circles
+            print circles
         except:
             #print 'null pointer bla bla'
             return
@@ -672,8 +668,6 @@ class ProcessPicThread(multiprocessing.Process):
                 #print contour
                 #print len(contour)
                 if len(contour) >= 6 :
-                    # because of bug in opencv 2.4.2 have to cast to int manually
-                    contour=contour.astype('int')
                     if cv2.contourArea(contour)<=(rectimage.shape[1]*rectimage.shape[0]/50)or cv2.contourArea(contour)>(rectimage.shape[1]*rectimage.shape[0]/2):
                         #print 'kicked'
                         continue
@@ -698,7 +692,7 @@ class ProcessPicThread(multiprocessing.Process):
                     left=int(EllipParnew.MidPos[0]-b/2)
                     low=int(EllipParnew.MidPos[1]-h/2)
                
-                    #print left,searchrect[0],low,searchrect[1],b,searchrect[2],h,searchrect[3],b,searchrect[2]/3,h,searchrect[3]/3
+                    print left,searchrect[0],low,searchrect[1],b,searchrect[2],h,searchrect[3],b,searchrect[2]/3,h,searchrect[3]/3
                     if left>searchrect[0] and low>searchrect[1] and b<searchrect[2] and h<searchrect[3] and b>searchrect[2]/5 and h>searchrect[3]/5:
                         found=1
                         cv2.rectangle(self.image,(searchrecttr[0],searchrecttr[1]),(int(searchrecttr[0]+searchrecttr[2]),int(searchrecttr[1]+searchrecttr[3])),(0,0,255),1)
@@ -732,8 +726,6 @@ class ProcessPicThread(multiprocessing.Process):
                         for contour in contours:
                         #print contour
                             if len(contour) >= 6:
-                                # because of bug in opencv 2.4.2 have to cast to int manually
-                                contour=contour.astype('int')
                                 if cv2.contourArea(contour)<=(rectimage.shape[1]*rectimage.shape[0]/50)or cv2.contourArea(contour)>(rectimage.shape[1]*rectimage.shape[0]/2):
                                     continue
                                 
@@ -891,7 +883,7 @@ class ProcessPicThread(multiprocessing.Process):
         
         pixin=img[int(height/2),int(width/2)]+img[int(height/2)+1,int(width/2)]+img[int(height/2),int(width/2)+1]+img[int(height/2)+1,int(width/2)+1]
         pixin=pixin/4
-        #print pixout,pixin
+        print pixout,pixin
         return pixout,pixin
     def NumEllip(self, elliplist):
         posiblenum=range(len(elliplist)+10)
