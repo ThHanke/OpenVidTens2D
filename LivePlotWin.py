@@ -3,13 +3,22 @@ import wx
 import threading
 import Queue
 import multiprocessing
+try:
+    import u12
+except:
+    print 'LabJack UW driver not found'
+    LABJACKDRIVER=False
+else:
+    LABJACKDRIVER=True
+
+
 
 import os
 import pickle
 
 import wx.lib.plot as plot
 
-from time import clock
+from time import clock,sleep
 
 #import globals
 import config
@@ -35,7 +44,12 @@ class LivePlotWin(wx.Frame):
         self.startbutton.SetBitmapSelected(wx.Image('Startdownsmall.png', wx.BITMAP_TYPE_PNG).ConvertToBitmap())
         self.stopbutton.SetBitmapSelected(wx.Image('Stopdownsmall.png', wx.BITMAP_TYPE_PNG).ConvertToBitmap())
         self.clearbutton=wx.Button(self.buttonpanel,wx.ID_ANY,'CLEAR',size=(60,28),style=wx.BU_EXACTFIT)
-        
+        self.usbmodulbox=wx.Choice(self.buttonpanel,wx.ID_ANY,choices=('None',))
+        if LABJACKDRIVER:
+            self.usbmodulbox.Append('LabJack U12')
+            
+        self.usbmodulbox.SetSelection(0)
+        self.USBModul=self.usbmodulbox.GetString(0)
         
         self.filetext=wx.TextCtrl(self.buttonpanel,wx.ID_ANY,size=(300,20),style=wx.BU_EXACTFIT)
         self.filetext.SetValue('data000.txt')
@@ -43,6 +57,7 @@ class LivePlotWin(wx.Frame):
         self.buttonsizer.Add(self.startbutton,0)
         self.buttonsizer.Add(self.stopbutton,0)
         self.buttonsizer.Add(self.clearbutton,0,wx.ALIGN_CENTER_VERTICAL)
+        self.buttonsizer.Add(self.usbmodulbox,0,wx.ALIGN_CENTER_VERTICAL)
         self.buttonsizer.Add(self.filetext,1,wx.ALIGN_CENTER_VERTICAL)
         
         self.buttonpanel.SetSizer(self.buttonsizer)
@@ -87,6 +102,7 @@ class LivePlotWin(wx.Frame):
         self.parentendpipe,self.childendpipe=multiprocessing.Pipe()
         #spawn pool of threads
         DataProtoProcess(self.childendpipe,self.trackresultqueue,self.plotwritequeue)
+        self.ExitBackground=False
         self.SendStatustoBackgroundProcess()
         
         #spawn pool of threads
@@ -95,6 +111,7 @@ class LivePlotWin(wx.Frame):
         self.startbutton.Bind(wx.EVT_BUTTON, self.OnStart)
         self.stopbutton.Bind(wx.EVT_BUTTON, self.OnStop)
         self.clearbutton.Bind(wx.EVT_BUTTON, self.OnClear)
+        self.usbmodulbox.Bind(wx.EVT_CHOICE,self.OnUSBModul)
 
 
         self.tree.Bind(wx.EVT_TREE_SEL_CHANGED,self.OnSelChanged)
@@ -116,7 +133,7 @@ class LivePlotWin(wx.Frame):
         self.Layout()
         self.Show()
     def SendStatustoBackgroundProcess(self):
-        self.parentendpipe.send((self.itemlist,self.toplotlist,self.tofile,self.filename,self.shouldclear))
+        self.parentendpipe.send((self.itemlist,self.toplotlist,self.tofile,self.filename,self.shouldclear,self.USBModul,self.ExitBackground))
     def OnStart(self,event):
         
         self.tofile=True
@@ -175,38 +192,18 @@ class LivePlotWin(wx.Frame):
         self.SendStatustoBackgroundProcess()
         self.shouldclear=False
         self.SetStatusText('Cleared live plot')
-        
-    def GetEllipWithNum(self,liste,num):
-        found=False
-        for listpos, item in enumerate(liste):
-            epar=config.EllipPar()
-            epar=liste[listpos]
-            if epar.Num==num:
-                found=True
-                break
-        if found:
-            return epar
-        else:
-            return None
-    def GetConnectWithNum(self,liste,num):
-        found=False
-        for listpos, item in enumerate(liste):
-            linepar=config.LinePar()
-            linepar=liste[listpos]
-            if linepar.Num==num:
-                found=True
-                break
-        if found:
-            return linepar
-        else:
-            return None
+    def OnUSBModul(self,event):
+        self.USBModul=event.GetString()
+        self.BuildTreeCtrl()
+
     def OnSelChanging(self,event):
         pass
     def OnSelChanged(self,event):
-
         if not self.tofile:
-            treesel=self.tree.GetSelections()
-            #print treesel
+            try:
+                treesel=self.tree.GetSelections()
+            except:
+                return
             self.toplotlist=list()
             for subitem in treesel:
                 if self.tree.ItemHasChildren(subitem ):
@@ -218,18 +215,23 @@ class LivePlotWin(wx.Frame):
                     if item.IsOk():
                         parent = self.tree.GetItemParent(item)            
                         if parent.IsOk():
-                            if self.tree.GetItemText(parent)=='Ellipse' or self.tree.GetItemText(parent)=='Connection':
+                            if self.tree.GetItemText(parent) in ('Ellipse','Connection','IO-Modul'):
                                 self.data = list()
-                                this=str(self.tree.GetItemText(parent)),int(self.tree.GetItemText(item)),str(self.tree.GetItemText(subitem))
+                                this=self.tree.GetItemText(parent),self.tree.GetItemText(item),self.tree.GetItemText(subitem)
                                 self.toplotlist.append(this)
-                
+            #print self.toplotlist
             self.SendStatustoBackgroundProcess()
             #print 'changes where send'
             
 
     def BuildTreeCtrl(self):
-
-        
+        #print "rebuild tree items" 
+       # print self.itemlist
+        #add measure modul signals
+        if self.USBModul=='LabJack U12':
+            self.itemlist.insert(0,'LabJack U12')
+        if self.USBModul=='None' and ('LabJack U12'in self.itemlist):
+            self.itemlist.remove('LabJack U12')
         self.tree.DeleteAllItems()
         Element = self.tree.AddRoot('Element')
         if len(self.itemlist)>0:
@@ -258,12 +260,20 @@ class LivePlotWin(wx.Frame):
                     c2=self.tree.AppendItem(this,'Range y')
 
                     c3=self.tree.AppendItem(this,'Lenght')
+                if item=='LabJack U12':
+                    Modul=self.tree.AppendItem(Element,'IO-Modul')
+                    this=self.tree.AppendItem(Modul,'Analog')
+                    c1=self.tree.AppendItem(this,'Diff1')
+                    c2=self.tree.AppendItem(this,'Diff2')
+                    
 
                     #print len(self.itemlist),len(elliplist),len(connectlist)
         self.RecallTreeSelection()
         self.tree.ExpandAll()
+        
 
     def RecallTreeSelection(self):
+        print 'mark previously selected'
         self.tree.UnselectAll()
         root=self.tree.GetRootItem()
         if root.IsOk():
@@ -273,13 +283,17 @@ class LivePlotWin(wx.Frame):
                 while grandchild[0].IsOk():
                     grandgrandchild=self.tree.GetFirstChild(grandchild[0])
                     while grandgrandchild[0].IsOk():
-                        if (str(self.tree.GetItemText(child[0])),int(self.tree.GetItemText(grandchild[0])),str(self.tree.GetItemText(grandgrandchild[0]))) in self.toplotlist:
-                            self.tree.SelectItem(grandgrandchild[0])    
+                        
+                        if (self.tree.GetItemText(child[0]),self.tree.GetItemText(grandchild[0]),self.tree.GetItemText(grandgrandchild[0])) in self.toplotlist:
+                            #self.tree.SelectItem(grandgrandchild[0])    
+                            self.tree.SetItemBold(grandgrandchild[0])    
                         grandgrandchild=self.tree.GetNextChild(grandgrandchild[0],grandgrandchild[1])
                     grandchild=self.tree.GetNextChild(grandchild[0],grandchild[1])
                 child=self.tree.GetNextChild(child[0],child[1])
 
     def OnClose(self,event):
+        self.ExitBackground=True
+        self.SendStatustoBackgroundProcess()
         for item in self.childs:
             item.OnClose(True)
         self.Destroy()
@@ -301,6 +315,7 @@ class DataProtoProcess(multiprocessing.Process):
         self.itemlist=list()
         self.toplotlist=list()
         self.tofile=False
+        self.USBdevice=None
 
         self.elliplist, self.connectlist=list(),list()
 
@@ -317,8 +332,16 @@ class DataProtoProcess(multiprocessing.Process):
 
             #print 'get actuall data form WInPlot'
             if self.pipeend.poll():
-                self.itemlist,self.toplotlist,self.tofile,self.filename,self.shouldclear=self.pipeend.recv()
-                #print self.itemlist,self.toplotlist,self.tofile,self.filename,self.calibrated,self.calibdata,self.shouldclear
+                self.itemlist,self.toplotlist,self.tofile,self.filename,self.shouldclear,USBModul,plsexit=self.pipeend.recv()
+                #print self.itemlist,self.toplotlist,self.tofile,self.filename,self.shouldclear,self.USBModul
+            if USBModul=='LabJack U12':
+                #print 'get first device'
+                self.USBdevice=u12.U12()
+            if USBModul=='None' and self.USBdevice!=None:
+                self.USBdevice=None
+            if plsexit:
+                #print 'killing myself'
+                break
            
             try:
                 (self.timestamp,self.image, self.elliplist, self.connectlist)=self.dataqueue.get(False)
@@ -339,6 +362,7 @@ class DataProtoProcess(multiprocessing.Process):
             #plot selection and write to file
             plotlist=list()
             self.plotmarkerlist=list()
+            #print self.toplotlist
        
             for listpos, item in enumerate(self.toplotlist):
                 self.toplot=self.toplotlist[listpos]
@@ -353,11 +377,11 @@ class DataProtoProcess(multiprocessing.Process):
                     linepar=config.LinePar()
                     epar1=config.EllipPar()
                     epar2=config.EllipPar()
-                    if self.GetConnectWithNum(self.connectlist,self.toplot[1]) == None:
+                    if self.GetConnectWithNum(self.connectlist,int(self.toplot[1])) == None:
                         #print 'no connect'
                         continue
                     else:
-                        linepar=self.GetConnectWithNum(self.connectlist,self.toplot[1])
+                        linepar=self.GetConnectWithNum(self.connectlist,int(self.toplot[1]))
                     
                     if self.GetEllipWithNum(self.elliplist,linepar.Pt1)== None or self.GetEllipWithNum(self.elliplist,linepar.Pt2) == None:
                         #print 'no points'
@@ -378,10 +402,10 @@ class DataProtoProcess(multiprocessing.Process):
                         this=c
                     temp.append((time,this))
                 if self.toplot[0]=='Ellipse':
-                    if self.GetEllipWithNum(self.elliplist,self.toplot[1])== None:
+                    if self.GetEllipWithNum(self.elliplist,int(self.toplot[1]))== None:
                         continue
                     else:
-                        epar=self.GetEllipWithNum(self.elliplist,self.toplot[1])
+                        epar=self.GetEllipWithNum(self.elliplist,int(self.toplot[1]))
                         #correct position concerning cam calibration
 
                         if self.toplot[2]=='MidPos x':
@@ -395,6 +419,18 @@ class DataProtoProcess(multiprocessing.Process):
                         if self.toplot[2]=='Angle':
                             this=epar.Angle
                         temp.append((time,this))
+                
+                if self.toplot[0]=='IO-Modul':
+
+                    if self.toplot[2]=='Diff1':
+                        result= self.USBdevice.eAnalogIn(8)
+                        this=result['voltage']
+                    if self.toplot[2]=='Diff2':
+                        result= self.USBdevice.eAnalogIn(9)
+                        this=result['voltage']
+                    temp.append((time,this))
+                        
+                        
                 if self.tofile:
                     if listpos==0:
                         string=str(time)+'\t'
@@ -477,6 +513,7 @@ class PlotWriteThread(threading.Thread):
         self.start()
         self.elliplist=list()
         self.connectlist=list()
+        self.listlength=0
         # start the thread
 
     def run(self):
@@ -487,13 +524,16 @@ class PlotWriteThread(threading.Thread):
 
             self.plotlist,self.elliplist,self.connectlist=self.plotwritequeue.get()
             #print plotlist
-
-            if len(self.parent.itemlist)!=len(self.elliplist)+len(self.connectlist):
+            
+            #check change in list lenght
+            
+            if self.listlength!=len(self.elliplist)+len(self.connectlist):
                 #print "rebuild tree items and send " 
                 self.parent.itemlist=list()
                 self.parent.itemlist.extend(self.elliplist)
                 self.parent.itemlist.extend(self.connectlist)
                 self.parent.BuildTreeCtrl()
+                self.listlength=len(self.elliplist)+len(self.connectlist)
 
             if len(self.plotlist)>0:
                 panelwidth,panelheight=self.parent.panel.GetSize()

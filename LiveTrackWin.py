@@ -1,5 +1,5 @@
 # -*- coding: cp1252 -*-
-import wx,cv,cv2,numpy
+import wx,cv2,numpy,os
 import threading
 
 
@@ -54,6 +54,7 @@ class LiveTrackWin(wx.Frame):
         self.Bind(wx.EVT_MENU, self.LoadCalibration, id=ID_CCALL)
         self.Bind(wx.EVT_MENU, self.SaveCalibration, id=ID_CCALS)
         self.Bind(wx.EVT_MENU, self.PickAll, id=ID_PICKALL)
+        self.Bind(wx.EVT_MENU, self.ChangeSRFactor, id=ID_SRFACTOR)
         self.Bind(wx.EVT_MENU, self.EnableRecord, id=ID_VSTREAM)
 
         self.panel.Bind(wx.EVT_MOUSEWHEEL, self.Mousewheel)
@@ -88,6 +89,7 @@ class LiveTrackWin(wx.Frame):
         self.connectlist=list()
         self.rightdown=False, (None,None), (None,None)
         self.PickAll=False
+
 
 
         self.CalibData=CalibData()
@@ -211,7 +213,7 @@ class LiveTrackWin(wx.Frame):
                 self.Replot()
     def CameraCalibration(self,event):
         #filters = 'Image files (*.gif;*.png;*.jpg;*.bmp)|*.gif;*.png;*.jpg;*.bmp'
-        print 'sendcommand'
+        #print 'sendcommand'
         self.parentendpipe.send(('calibrate',None))
         #self.SendStatustoBackgroundProcess()
         
@@ -350,6 +352,8 @@ class LiveTrackWin(wx.Frame):
             posiblenum.remove(linepar.Num)
         return posiblenum[0]
     def OnClose(self,event):
+        #print 'closing TrackWin'
+        self.parentendpipe.send('Exit')
         for item in self.childs:
             item.OnClose(True)
         self.Destroy()
@@ -384,6 +388,9 @@ class ProcessPicThread(multiprocessing.Process):
         self.calibrate=False
         self.obj_points = []
         self.img_points = []
+
+        self.videofilename=''
+        self.videofilepart=1
         self.daemon=True
 
 
@@ -399,37 +406,16 @@ class ProcessPicThread(multiprocessing.Process):
         # start the thread
     def run(self):
         while True:
-            imagetuple=self.queue.get()
-            self.timestamp=imagetuple[0]
-            self.raw=numpy.copy(imagetuple[1])
-
-            temp=numpy.copy(self.raw)
-            self.image=cv2.cvtColor(self.raw,cv2.COLOR_GRAY2RGB)
-
             self.newelliplist=list()
             self.newconnectlist=list()
-            self.acttime=clock()
-            if self.acttime-self.lasttime<1:
-                self.framecount+=1
-            else:
-                # full second
-                self.actframecount=self.framecount
-                self.framecount=1
-                self.lasttime=self.acttime
 
-            if self.calibrated:
-                #print 'remap'
-                self.raw=cv2.remap(temp,self.mapx,self.mapy,cv2.INTER_LINEAR)
-                #self.raw=cv2.undistort(temp,self.intrinsic,self.distortion)
-            else:
-                self.raw=temp
 
-            
+            #polling pipes
             
             if self.pipeend.poll():
                 #self.newellip,self.pickall,self.rightdown,self.seachrectfactor,self.calibrate=self.pipeend.recv()
                 msg=self.pipeend.recv()
-                print msg
+                #print msg
                 if msg[0]=='New mark':
                     self.newellip=msg[1]
                     #try to find a new ellip
@@ -464,7 +450,7 @@ class ProcessPicThread(multiprocessing.Process):
                         if newcon.Pt1!=newcon.Pt2 and newcon.Pt1!=None and newcon.Pt1!=None:
                          
                             newcon.Num=self.NumConnect(self.connectlist)
-                            print "connection appended"
+                            #print "connection appended"
                             self.pipeend.send('New connection in place!')
                             self.connectlist.append(newcon)
 
@@ -475,7 +461,7 @@ class ProcessPicThread(multiprocessing.Process):
                             #print 'ellip removed'
                             self.pipeend.send('Mark removed!')
                 if msg[0]=='calibrate':
-                    print 'calibrate'
+                    #print 'calibrate'
                     self.calibrate=True
                     continue
 
@@ -494,20 +480,56 @@ class ProcessPicThread(multiprocessing.Process):
                     self.recordstream=True
                 if msg=='Disable Record':
                     self.recordstream=False
+                if msg=='Exit':
+                    #print 'killing process'
+                    break
+                
             if self.pipetoplot.poll():
                 msg=self.pipetoplot.recv()
-                print msg
+                #print msg
                 if msg[0]=='Capturing':
-                    fourcc= cv.CV_FOURCC('D','I','B',' ')
+                    fourcc= cv2.cv.CV_FOURCC('D','I','B',' ')
                     name=msg[1].split('.',1)[0]
-                    print name
-                    self.videowriter=cv2.VideoWriter(name+'.avi',fourcc,30,(self.raw.shape[1],self.raw.shape[0]))
+                    #print name
+                    self.videofilename=name
+                    self.videowriter=cv2.VideoWriter(self.videofilename+'.avi',fourcc,30,(self.raw.shape[1],self.raw.shape[0]),isColor=False)
                     self.capturing=True
                 if msg=='Stopped Capturing':
                     self.videowriter.release()
-                    print 'Stopped'
+                    self.videofilepart=1
+                    #print 'Stopped'
                     del self.videowriter
                     self.capturing=False
+
+
+            #try getting images
+            
+            try:
+                imagetuple=self.queue.get(False)
+            except Queue.Empty:
+                #print 'no pic: i continue'
+                continue
+            self.timestamp=imagetuple[0]
+            self.raw=numpy.copy(imagetuple[1])
+
+            temp=numpy.copy(self.raw)
+            self.image=cv2.cvtColor(self.raw,cv2.COLOR_GRAY2RGB)
+
+            self.acttime=clock()
+            if self.acttime-self.lasttime<1:
+                self.framecount+=1
+            else:
+                # full second
+                self.actframecount=self.framecount
+                self.framecount=1
+                self.lasttime=self.acttime
+
+            if self.calibrated:
+                #print 'remap'
+                self.raw=cv2.remap(temp,self.mapx,self.mapy,cv2.INTER_LINEAR)
+                #self.raw=cv2.undistort(temp,self.intrinsic,self.distortion)
+            else:
+                self.raw=temp
                     
                 
                         
@@ -571,9 +593,20 @@ class ProcessPicThread(multiprocessing.Process):
 
             #cature videostream
             if self.recordstream and self.capturing:
+                #check filesize
+                if self.videofilepart==1:
+                    filesize=os.path.getsize(self.videofilename+'.avi')
+                else:
+                    filesize=os.path.getsize(self.videofilename+'part'+str(self.videofilepart)+'.avi')
+                    
+                if filesize>=4294967296: #4GB
+                    self.videowriter.release()
+                    self.videofilepart+=1
+                    self.videowriter=cv2.VideoWriter(self.videofilename+'part'+str(self.videofilepart)+'.avi',fourcc,30,(self.raw.shape[1],self.raw.shape[0]),isColor=False)
+                    
                 self.videowriter.write(self.raw)
                 print 'recording'
-                print self.videowriter
+                #print self.videowriter
 
             #show in frame - put it to paintqueue
             try:
@@ -675,7 +708,7 @@ class ProcessPicThread(multiprocessing.Process):
 
     def PickAll(self,gray):
         try:
-            circles=cv2.HoughCircles(gray, cv.CV_HOUGH_GRADIENT,2,int(gray.shape[1]/20), 192, 50)
+            circles=cv2.HoughCircles(gray, cv2.CV_HOUGH_GRADIENT,2,int(gray.shape[1]/20), 192, 50)
             print circles
         except:
             #print 'null pointer bla bla'

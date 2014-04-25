@@ -3,6 +3,9 @@ import py2exe
 
 
 import sys
+
+import numpy
+
 sys.argv = ["blah","py2exe"]
 
 includes = []
@@ -13,8 +16,9 @@ excludes = ['_gtkagg', '_tkagg', 'bsddb', 'curses', 'email', 'pywin.debugger',
 
 packages = []
 #dll_excludes = ['libgdk-win32-2.0-0.dll', 'libgobject-2.0-0.dll', 'tcl84.dll','tk84.dll']
-dll_excludes = ['MSVCR80.dll','MSVCP80.dll','MSVCR90.dll','MSVCP90.dll','vcomp.dll']
-dll_excludes = list()
+#dll_excludes = ['MSVCR80.dll','MSVCP80.dll','MSVCR90.dll','MSVCP90.dll','vcomp.dll']
+dll_excludes = ['MSVCP90.dll']
+
 
 setup(data_files = [('', ['calicon.png',
                           'logoOpenVidTens.png',
@@ -30,7 +34,7 @@ setup(data_files = [('', ['calicon.png',
                                                 
                           ])],
 
-      options = {"py2exe": {"compressed": 0,"optimize": 0,
+      options = {"py2exe": {"compressed": 1,"optimize": 1,
                             "includes": includes,
                             "excludes": excludes,
                             "packages": packages,

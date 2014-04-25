@@ -1,5 +1,6 @@
 # -*- coding: cp1252 -*-
 import wx
+import sys
 
 from time import sleep
 
@@ -60,6 +61,8 @@ class InitFrame(wx.Frame):
         
         self.status.SetStatusText('Initilization succeeded')
         sleep(0.1)
+        #check if x64
+        #print sys.maxint
         self.Destroy()
 
 

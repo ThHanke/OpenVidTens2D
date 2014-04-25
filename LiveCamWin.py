@@ -1,5 +1,5 @@
 
-import wx,cv,cv2,numpy,os
+import wx,cv2,numpy,os
 import threading
 import Queue
 import VideoCapture
@@ -103,14 +103,14 @@ class LiveCamWin(wx.Frame):
     def PollPipeToTrack(self,event):
         if self.pipetotrack.poll():
             result=self.pipetotrack.recv()
-            print result
+            #print result
             if result=='Replot':
                 if self.isfileinterface:
                     self.OnSlider(True,self.imageslider.GetValue())
     def CleanUpBeforeInterfaceSwitch(self):
         if isinstance(self.caminterface,VideoCapture.Device):
             #print 'stop aquiring'
-            self.aquirequeue.put((self,None,False),False)
+            self.aquirequeue.put((self,self.caminterface,True))
             #print 'stopped aquiring'
             del self.caminterface
             self.caminterface=None
@@ -121,20 +121,27 @@ class LiveCamWin(wx.Frame):
             #print item
             if isinstance(item,VidCapQueuePicThread):
                 #print 'found one! kill it!'
-                self.aquirequeue.put((self,None,True),True)
+                self.aquirequeue.put((self,None,True))
                 sleep(0.1)
                 self.aquirequeue.queue.clear()
                 #print self.aquirequeue.queue
             if isinstance(item,QueuePicThread):
                 #print 'found one! kill it!'
-                self.aquirequeue.put((self,None,None,None,None,True),True)
+                self.aquirequeue.put((None, None, True))
                 sleep(0.1)
                 self.aquirequeue.queue.clear()
                 #print self.aquirequeue.queue
-
+            if isinstance(item,WinCamBmpPaintThread):
+                #print 'found one! kill it!'
+                self.bmppaintqueue.put(None)
+                sleep(0.1)
+                self.aquirequeue.queue.clear()
 
         if self.isfileinterface:
+            #print 'delete widgets'
+            self.imageslider.Destroy()
             self.sliderpanel.Destroy()
+            self.sliderpanel=None
 
         if isinstance(self.panel,wx.Panel):
             self.panel.Destroy()
@@ -146,8 +153,9 @@ class LiveCamWin(wx.Frame):
     
     def InitVidCapCamera(self,num=-1):
         #DirectShowDevice
-        self.isfileinterface=False
+        
         self.CleanUpBeforeInterfaceSwitch()
+        self.isfileinterface=False
         if num<0:
             for i in range(0,2):
                 try:
@@ -167,7 +175,8 @@ class LiveCamWin(wx.Frame):
                 self.caminterface=None
                 return False
 
-        self.ScaledImg=cv.CreateImage((100,100),8,3)
+        #self.ScaledImg=cv.CreateImage((100,100),8,3)
+        self.ScaledImg=numpy.zeros((100,100,3), dtype=numpy.uint8)
         
         self.panel=wx.Panel(self, wx.ID_ANY, style=wx.BORDER_SUNKEN)
         self.panelsizer=wx.BoxSizer(wx.HORIZONTAL)
@@ -320,12 +329,13 @@ class LiveCamWin(wx.Frame):
     def InitFileInterface(self):
 
         self.CleanUpBeforeInterfaceSwitch()
-        
+        self.isfileinterface=True
         
 
 
         self.dirname=config.ProgDir
-        self.ScaledImg=cv.CreateImage((100,100),8,3)
+        #self.ScaledImg=cv.CreateImage((100,100),8,3)
+        self.ScaledImg=numpy.zeros((100,100,3), dtype=numpy.uint8)
 
         
         
@@ -359,7 +369,7 @@ class LiveCamWin(wx.Frame):
 
         self.Layout()
 
-        self.isfileinterface=True
+       
         self.CreateMenu()
         return True
 
@@ -456,7 +466,7 @@ class LiveCamWin(wx.Frame):
 
     def OnClose(self, event):
         if self.caminterface!=None:
-            self.aquirequeue.put((self,None,False),True)
+            self.aquirequeue.put((self,None,False),False)
             sleep(0.3)
         try:
             del self.caminterface
@@ -487,7 +497,7 @@ class QueuePicThread(threading.Thread):
             #print self.aquirequeue.queue
             (self.timestamp, image, plsexit)=self.aquirequeue.get()
             if plsexit:
-                #print 'return'
+                #print 'QueuePicThread exiting'
                 break
             #print "Aquirethread got task"
             
@@ -523,22 +533,22 @@ class VidCapQueuePicThread(threading.Thread):
 
         self.lasttime=0
         self.framecount=0
+        self.plsexit=False
         
         self.setDaemon(True)
         self.start()
         # start the thread
-     
 
 
     def run(self):
         #print "Aquirethread started "+str(self.num)
-        plsexit=False
 
         while True:
             if not self.aquirequeue.empty():
-                (parent,self.caminterface,plsexit) =self.aquirequeue.get()
+                (parent,self.caminterface,self.plsexit) =self.aquirequeue.get()
                 
-            if plsexit:
+            if self.plsexit:
+                #print 'vidcap is exiting'
                 break
 
             if self.caminterface is not None:
@@ -560,7 +570,7 @@ class VidCapQueuePicThread(threading.Thread):
                     np_temp=numpy.reshape(temp_np, (rawdata[2],rawdata[1],3))
                     temp_np=cv2.flip(np_temp,0)
                     temp_np=cv2.cvtColor(temp_np,cv2.COLOR_BGR2RGB)
-                    self.gray=cv2.cvtColor(temp_np,cv.CV_RGB2GRAY)
+                    self.gray=cv2.cvtColor(temp_np,cv2.COLOR_RGB2GRAY)
 
                     try:
                         #self.totrackqueue.put((self.timestamp,(self.raw.tostring(),self.raw.width,self.raw.height)),False)
@@ -588,14 +598,17 @@ class WinCamBmpPaintThread(threading.Thread):
         self.panel=panel
  
 
-        self.ScaledImg=cv.CreateImage((100,100),8,3)
-        #self.setDaemon(True)
+        #self.ScaledImg=cv.CreateImage((100,100),8,3)
+        self.ScaledImg=numpy.zeros((100,100), dtype=numpy.uint8)
+        self.setDaemon(True)
         self.start()
         # start the thread
 
     def run(self):
         while True:
             (image)=self.bmppaintqueue.get()
+            if image==None:
+                break
             dc=wx.ClientDC(self.panel)
             #print "Bmpthread got task"
             panelwidth,panelheight=dc.GetSize()
