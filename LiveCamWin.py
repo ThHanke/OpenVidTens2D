@@ -11,14 +11,14 @@ from time import sleep
 #import globals
 import config
 
-ID_CAM1=wx.NewId()
-ID_CAM2=wx.NewId()
-ID_CAM3=wx.NewId()
+ID_CAM=wx.NewId()
 ID_FILE=wx.NewId()
+ID_CNEXT=wx.NewId()
 ID_CPROP=wx.NewId()
 
 ID_LSERIES=wx.NewId()
 ID_LFOLDER=wx.NewId()
+ID_LMOVIE=wx.NewId()
 ID_GOTHROUGH=wx.NewId()
 
 class LiveCamWin(wx.Frame):
@@ -34,6 +34,7 @@ class LiveCamWin(wx.Frame):
         #startwerte
         self.caminterface=None
         self.isfileinterface=False
+        self.fileismovie=False
         self.datatoqueue=list()
 
         self.aquirequeue=Queue.Queue(1)
@@ -72,15 +73,11 @@ class LiveCamWin(wx.Frame):
         Source = wx.Menu()
 
         self.Menubar.Append(Source,'&Source')
-        Source.Append(ID_CAM1,'&Cam 1','Set camera 1')
-        Source.Append(ID_CAM2,'&Cam 2','Set camera 2')
-        Source.Append(ID_CAM3,'&Cam 3','Set camera 3')
+        Source.Append(ID_CAM,'&Cam','Set Camera')
         Source.Append(ID_FILE,'&File','Set file interface')
 
         
-        self.Bind(wx.EVT_MENU, self.VidCapSetCamera, id=ID_CAM1)
-        self.Bind(wx.EVT_MENU, self.VidCapSetCamera, id=ID_CAM2)
-        self.Bind(wx.EVT_MENU, self.VidCapSetCamera, id=ID_CAM3)
+        self.Bind(wx.EVT_MENU, self.VidCapSetCamera, id=ID_CAM)
         self.Bind(wx.EVT_MENU, self.SetFilemode, id=ID_FILE)
 
         if isinstance(self.caminterface,VideoCapture.Device):
@@ -88,16 +85,20 @@ class LiveCamWin(wx.Frame):
             self.Menubar.Append(Config,'&Config')
             Config.Append(ID_CPROP,'&Properties','Camera Properties')
             self.Bind(wx.EVT_MENU, self.VidCapProperties, id=ID_CPROP)
+            Config.Append(ID_CNEXT,'&Next CAM','next Camera')
+            self.Bind(wx.EVT_MENU, self.InitVidCapCamera, id=ID_CNEXT)
 
         if self.isfileinterface:
             Operate = wx.Menu()
             self.Menubar.Append(Operate,'&Operate')
             Operate.Append(ID_LSERIES,'&Load Series','Load image series')
             Operate.Append(ID_LFOLDER,'&Load Directory','Load image series from Directory')
+            Operate.Append(ID_LMOVIE,'&Load Movie','Load movie from avi')
             Operate.Append(ID_GOTHROUGH,'&Gothrough','Go through series')
             self.Bind(wx.EVT_MENU, self.LoadSeries, id=ID_LSERIES)
             self.Bind(wx.EVT_MENU, self.LoadDir, id=ID_LFOLDER)
             self.Bind(wx.EVT_MENU, self.GoThrough, id=ID_GOTHROUGH)
+            self.Bind(wx.EVT_MENU, self.LoadMovie, id=ID_LMOVIE)
 
         self.SetMenuBar(self.Menubar)
     def PollPipeToTrack(self,event):
@@ -107,6 +108,17 @@ class LiveCamWin(wx.Frame):
             if result=='Replot':
                 if self.isfileinterface:
                     self.OnSlider(True,self.imageslider.GetValue())
+            if result=='Stop gothrough':
+                self.gothrough=False
+            if result=='Next Frame pls':
+                if self.isfileinterface:
+                    if self.gothrough:
+                        if self.imageslider.GetValue()<self.imageslider.GetMax():
+                            self.OnSlider(True,self.imageslider.GetValue()+1)
+                        else:
+                            self.gothrough=False
+        
+                
     def CleanUpBeforeInterfaceSwitch(self):
         if isinstance(self.caminterface,VideoCapture.Device):
             #print 'stop aquiring'
@@ -142,6 +154,9 @@ class LiveCamWin(wx.Frame):
             self.imageslider.Destroy()
             self.sliderpanel.Destroy()
             self.sliderpanel=None
+            self.filecapture=None
+            self.isfileinterface=False
+            self.fileismovie=False
 
         if isinstance(self.panel,wx.Panel):
             self.panel.Destroy()
@@ -153,6 +168,15 @@ class LiveCamWin(wx.Frame):
     
     def InitVidCapCamera(self,num=-1):
         #DirectShowDevice
+        #return False
+        if isinstance(self.caminterface,VideoCapture.Device):
+            print 'cam active'
+            for i in range(0,2):
+                nextcam=VideoCapture.Device(i)
+                if self.caminterface!=nextcam:
+                    self.caminterface=nextcam
+                    
+            
         
         self.CleanUpBeforeInterfaceSwitch()
         self.isfileinterface=False
@@ -160,9 +184,13 @@ class LiveCamWin(wx.Frame):
             for i in range(0,2):
                 try:
                     self.caminterface = VideoCapture.Device(i)
-                    self.caminterface.setResolution(1000,1000)
+                    #print 'a'
+                    test=self.caminterface.getImage()
+                    print test.size
+                    #self.caminterface.setResolution(1000,1000)
                     break
                 except:
+                    print 'oh no no camera interface failed'
                     self.caminterface=None
                     continue
             if self.caminterface==None:
@@ -189,7 +217,8 @@ class LiveCamWin(wx.Frame):
 
         VidCapQueuePicThread(self.aquirequeue,self.bmppaintqueue,self.totrackqueue,0)
         WinCamBmpPaintThread(self.bmppaintqueue,self.panel)
-            
+
+        
                 
 
         #print threading.enumerate()
@@ -199,13 +228,7 @@ class LiveCamWin(wx.Frame):
         self.aquirequeue.put((self,self.caminterface,False),False)
         return True
     def VidCapSetCamera(self,event):
-        
-        if event.GetId()==ID_CAM1:
-            self.InitVidCapCamera(0)
-        if event.GetId()==ID_CAM2:
-            self.InitVidCapCamera(1)
-        if event.GetId()==ID_CAM3:
-            self.InitVidCapCamera(2)
+        self.InitVidCapCamera()
         
     def VidCapProperties(self,event):
         #stop aquiring
@@ -217,42 +240,45 @@ class LiveCamWin(wx.Frame):
     def InitOpenCVCamera(self):
         # is broken
         pass
+        
+#        self.CVinterface=cv2.VideoCapture(0)
+#        print self.CVinterface.isOpened()
+###		
+###        width = 800 #leave None for auto-detection
+###        height = 600 #leave None for auto-detection
+###
+###        if width is None:
+###                width = int(cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FRAME_WIDTH))
+###        else:
+###                cv.SetCaptureProperty(self.CamInterface,cv.CV_CAP_PROP_FRAME_WIDTH,width)    
+###
+###        if height is None:
+###                height = int(cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FRAME_HEIGHT))
+###        else:
+###                cv.SetCaptureProperty(self.CamInterface,cv.CV_CAP_PROP_FRAME_HEIGHT,height) 
+###        #cv.SetCaptureProperty(self.CamInterface,cv.CV_CAP_PROP_FPS,30)
+###        #cv.GetCaptureProperty(self.CamInterface,cv.CV_CAP_PROP_MODE)
+###
+#        width=self.CVinterface.get(cv2.cv.CV_CAP_PROP_FRAME_WIDTH)
+#        height=self.CVinterface.get(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT)
+#        print self.CVinterface.get(cv2.cv.CV_CAP_PROP_FORMAT)
+#        print self.CVinterface.get(cv2.cv.CV_CAP_PROP_FPS)
+#        print self.CVinterface.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
+#        print self.CVinterface.get(cv2.cv.CV_CAP_PROP_MODE)
+#        print self.CVinterface.get(cv2.cv.CV_CAP_PROP_GAIN)
+#
+#        ID_CPROP=wx.NewId()
+#        
+#        Menubar =wx.MenuBar()
+#        Config = wx.Menu()
+#        Menubar.Append(Config,'&Config')
+#        Config.Append(ID_CPROP,'&Properties','Camera Properties')
+#        self.SetMenuBar(Menubar)
+#        self.Bind(wx.EVT_MENU, self.OpenCVCamProp, id=ID_CPROP)
+###        
+#        print width,height
+        
 
-##        self.CamInterface=cv.CreateCameraCapture(0)
-##		
-##        width = 800 #leave None for auto-detection
-##        height = 600 #leave None for auto-detection
-##
-##        if width is None:
-##                width = int(cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FRAME_WIDTH))
-##        else:
-##                cv.SetCaptureProperty(self.CamInterface,cv.CV_CAP_PROP_FRAME_WIDTH,width)    
-##
-##        if height is None:
-##                height = int(cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FRAME_HEIGHT))
-##        else:
-##                cv.SetCaptureProperty(self.CamInterface,cv.CV_CAP_PROP_FRAME_HEIGHT,height) 
-##        #cv.SetCaptureProperty(self.CamInterface,cv.CV_CAP_PROP_FPS,30)
-##        #cv.GetCaptureProperty(self.CamInterface,cv.CV_CAP_PROP_MODE)
-##
-##        #print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FRAME_WIDTH)
-##        #print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FRAME_HEIGHT)
-##        #print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FORMAT)
-##        #print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FPS)
-##        #print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_FRAME_COUNT)
-##        #print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_MODE)
-##        #print cv.GetCaptureProperty(self.CamInterface, cv.CV_CAP_PROP_GAIN)
-##
-##        ID_CPROP=wx.NewId()
-##        
-##        Menubar =wx.MenuBar()
-##        Config = wx.Menu()
-##        Menubar.Append(Config,'&Config')
-##        Config.Append(ID_CPROP,'&Properties','Camera Properties')
-##        self.SetMenuBar(Menubar)
-##        self.Bind(wx.EVT_MENU, self.OpenCVCamProp, id=ID_CPROP)
-##        
-##        print width,height
 ##
 ##        self.image=cv.QueryFrame( self.CamInterface)
 ##        if self.image==None:
@@ -330,7 +356,7 @@ class LiveCamWin(wx.Frame):
 
         self.CleanUpBeforeInterfaceSwitch()
         self.isfileinterface=True
-        
+        self.ismovie=False
 
 
         self.dirname=config.ProgDir
@@ -338,11 +364,7 @@ class LiveCamWin(wx.Frame):
         self.ScaledImg=numpy.zeros((100,100,3), dtype=numpy.uint8)
 
         
-        
-        self.ID_FTIMER=wx.NewId()
-        self.Timer=wx.Timer(self, self.ID_FTIMER)
-        self.Timer.Start(0.01)
-        self.Bind(wx.EVT_TIMER,self.GotoNextFile,id=self.ID_FTIMER)
+
         self.Bind(wx.EVT_SCROLL_CHANGED,self.OnSlider)
         
         
@@ -355,6 +377,7 @@ class LiveCamWin(wx.Frame):
         self.slidersizer.Add(self.imageslider,0,wx.EXPAND)
         self.sliderpanel.SetSizer(self.slidersizer)
         self.panel=wx.Panel(self, wx.ID_ANY, style=wx.NO_BORDER)
+
         
         self.panelsizer=wx.BoxSizer(wx.VERTICAL)
         self.panelsizer.Add(self.sliderpanel,0,wx.EXPAND)
@@ -372,6 +395,7 @@ class LiveCamWin(wx.Frame):
        
         self.CreateMenu()
         return True
+
 
     def SetFilemode(self,event):
         self.InitFileInterface()
@@ -426,7 +450,35 @@ class LiveCamWin(wx.Frame):
             self.imageslider.SetValue(1)
             self.OnSlider(True)
         return True    
+    def LoadMovie(self, event):
+        filters = 'Video file (*.avi)|*.avi' 
+        dlg = wx.FileDialog(self, "Select files", self.dirname, "", filters, wx.FD_MULTIPLE)
+        if dlg.ShowModal() == wx.ID_OK:
+            try:
                 
+                self.filenames=dlg.GetFilenames()
+
+                self.dirname=dlg.GetDirectory()
+            except:
+                dlg.Destroy()
+                return False
+        from os.path import abspath, join
+         
+        moviePath = abspath( join(self.dirname, self.filenames[0]) )
+        self.SetStatusText(moviePath)
+        self.filecapture=cv2.VideoCapture(moviePath)
+        piccount=int(self.filecapture.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT))
+        #next print must be called except image while be tiled
+
+        print str(self.filecapture.get(cv2.cv.CV_CAP_PROP_FRAME_WIDTH))+'x'+str(self.filecapture.get(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT))
+        self.imageslider.SetMin(1)
+        self.imageslider.SetMax(piccount-1)
+        self.imageslider.SetValue(piccount)
+        self.imageslider.Enable(True)
+        dlg.Destroy()
+        self.imageslider.SetValue(1)
+        self.fileismovie=True
+        self.OnSlider(True)
         
     def OnSlider(self, event, picnum=None):
         #if event 
@@ -435,29 +487,27 @@ class LiveCamWin(wx.Frame):
         else:
             #print 'set value'
             self.imageslider.SetValue(picnum)
+        #print picnum
+        if self.fileismovie:
+            self.filecapture.set(cv2.cv.CV_CAP_PROP_POS_FRAMES,picnum-1)
+            err, temp=self.filecapture.read()
+            #print err
+            self.image=numpy.copy(temp)         
+            self.acttime=clock()
+        else:
+            from os.path import abspath, join
 
-        from os.path import abspath, join
+            #print self.dirname
 
-        #print self.dirname
+            imagePath = abspath( join(self.dirname, self.filenames[picnum-1]) )
+            self.SetStatusText(imagePath)
+            self.image=cv2.imread(imagePath,3)
+            self.image=cv2.cvtColor(self.image,cv2.COLOR_BGR2RGB)
 
-        imagePath = abspath( join(self.dirname, self.filenames[picnum-1]) )
-        self.image=cv2.imread(imagePath,3)
-        self.image=cv2.cvtColor(self.image,cv2.COLOR_BGR2RGB)
-
-        self.acttime=clock()
+            self.acttime=clock()
 
         #print 'send file to aquire'
         self.aquirequeue.put((self.imageslider.GetValue(), self.image, False),False)
-
-    def GotoNextFile(self,event):
-        #print 'go to next file'
-        if self.gothrough:
-            if self.aquirequeue.empty():
-                if self.imageslider.GetValue()<self.imageslider.GetMax():
-                    self.OnSlider(True,self.imageslider.GetValue()+1)
-                    #self.aquirequeue.join()
-                else:
-                    self.gothrough=False
             
         
     def GoThrough(self,event):
@@ -596,31 +646,38 @@ class WinCamBmpPaintThread(threading.Thread):
         threading.Thread.__init__(self)
         self.bmppaintqueue=bmppaintqueue
         self.panel=panel
- 
-
+        
         #self.ScaledImg=cv.CreateImage((100,100),8,3)
         self.ScaledImg=numpy.zeros((100,100), dtype=numpy.uint8)
         self.setDaemon(True)
         self.start()
         # start the thread
+        self.panel.Bind(wx.EVT_PAINT, self.onPaint)
 
     def run(self):
         while True:
-            (image)=self.bmppaintqueue.get()
-            if image==None:
+            self.image=self.bmppaintqueue.get()
+            if self.image==None:
                 break
-            dc=wx.ClientDC(self.panel)
-            #print "Bmpthread got task"
-            panelwidth,panelheight=dc.GetSize()
-            if (panelwidth <=0) or (panelheight <=0):
-                continue
-            self.ScaledImg=cv2.resize(image,( panelwidth,panelheight))
-            #numpy array to bitmap
-            wximage=wx.EmptyImage(panelwidth,panelheight)
-            wximage.SetData( self.ScaledImg.tostring())
-            self.bitmap=wximage.ConvertToBitmap()
-            dc.DrawBitmap(self.bitmap, 0, 0, False)     
+            self.ResizeAndDraw(self.panel,self.image)
             self.bmppaintqueue.task_done()
+
+    def onPaint(self,event):
+        #print 'Panel Paint event'
+        try:
+            self.ResizeAndDraw(self.panel,self.image)
+        except:
+            pass
+        event.Skip()
+    def ResizeAndDraw(self,panel,img):
+        dc = wx.ClientDC(panel)
+        panelwidth,panelheight=dc.GetSize()
+        if (panelwidth <=0) or (panelheight <=0):
+            return
+        ScaledImg=cv2.resize(img,( panelwidth,panelheight))
+        row,col,x=ScaledImg.shape
+        bitmap=wx.BitmapFromBuffer(col, row, ScaledImg)
+        dc.DrawBitmap(bitmap, 0, 0, False)
 
 
 

@@ -133,6 +133,7 @@ class LivePlotWin(wx.Frame):
         self.Layout()
         self.Show()
     def SendStatustoBackgroundProcess(self):
+        #print self.tofile,self.filename
         self.parentendpipe.send((self.itemlist,self.toplotlist,self.tofile,self.filename,self.shouldclear,self.USBModul,self.ExitBackground))
     def OnStart(self,event):
         
@@ -157,10 +158,8 @@ class LivePlotWin(wx.Frame):
             self.filename=comps[0][0:(i+1)]+newcountstring+comps[1]+comps[2]
             self.filetext.SetValue(self.filename)
             
-        self.fp=open(self.filename,'w',0)
-       
-        self.WriteDataHead(self.fp)
-        self.SetStatusText('Capturing - freezing Selection ')
+
+        #self.SetStatusText('Capturing - freezing Selection ')
         self.pipetotrack.send(('Capturing',self.filename))
         self.capturestarttime=clock()
         #self.data=list()
@@ -180,8 +179,6 @@ class LivePlotWin(wx.Frame):
     def OnStop(self,event):
         self.pipetotrack.send('Stopped Capturing')
         self.tofile=False
-        if self.fp!=None:
-            self.fp.close()
 
         self.SendStatustoBackgroundProcess()
         
@@ -199,29 +196,28 @@ class LivePlotWin(wx.Frame):
     def OnSelChanging(self,event):
         pass
     def OnSelChanged(self,event):
-        if not self.tofile:
-            try:
-                treesel=self.tree.GetSelections()
-            except:
-                return
-            self.toplotlist=list()
-            for subitem in treesel:
-                if self.tree.ItemHasChildren(subitem ):
-                    self.tree.UnselectItem(subitem )
-                    continue
-                if subitem.IsOk():
-                    #self.tree.SetItemImage(subitem,0)
-                    item=self.tree.GetItemParent(subitem)
-                    if item.IsOk():
-                        parent = self.tree.GetItemParent(item)            
-                        if parent.IsOk():
-                            if self.tree.GetItemText(parent) in ('Ellipse','Connection','IO-Modul'):
-                                self.data = list()
-                                this=self.tree.GetItemText(parent),self.tree.GetItemText(item),self.tree.GetItemText(subitem)
-                                self.toplotlist.append(this)
-            #print self.toplotlist
-            self.SendStatustoBackgroundProcess()
-            #print 'changes where send'
+        try:
+            treesel=self.tree.GetSelections()
+        except:
+            return
+        self.toplotlist=list()
+        for subitem in treesel:
+            if self.tree.ItemHasChildren(subitem ):
+                self.tree.UnselectItem(subitem )
+                continue
+            if subitem.IsOk():
+                #self.tree.SetItemImage(subitem,0)
+                item=self.tree.GetItemParent(subitem)
+                if item.IsOk():
+                    parent = self.tree.GetItemParent(item)            
+                    if parent.IsOk():
+                        if self.tree.GetItemText(parent) in ('Ellipse','Connection','IO-Modul'):
+                            self.data = list()
+                            this=self.tree.GetItemText(parent),self.tree.GetItemText(item),self.tree.GetItemText(subitem)
+                            self.toplotlist.append(this)
+        #print self.toplotlist
+        self.SendStatustoBackgroundProcess()
+        #print 'changes where send'
             
 
     def BuildTreeCtrl(self):
@@ -273,7 +269,7 @@ class LivePlotWin(wx.Frame):
         
 
     def RecallTreeSelection(self):
-        print 'mark previously selected'
+        #print 'mark previously selected'
         self.tree.UnselectAll()
         root=self.tree.GetRootItem()
         if root.IsOk():
@@ -334,6 +330,50 @@ class DataProtoProcess(multiprocessing.Process):
             if self.pipeend.poll():
                 self.itemlist,self.toplotlist,self.tofile,self.filename,self.shouldclear,USBModul,plsexit=self.pipeend.recv()
                 #print self.itemlist,self.toplotlist,self.tofile,self.filename,self.shouldclear,self.USBModul
+
+                self.availabledatalist=list()
+
+                if len(self.itemlist)>0:
+                    
+                    for listpos, item in enumerate(self.itemlist):
+                        if isinstance(self.itemlist[listpos],config.EllipPar):
+                            #print "is ellip"
+                            par=config.EllipPar()
+                            par=self.itemlist[listpos]
+                            self.availabledatalist.append((unicode('Ellipse'),unicode(str(par.Num)),unicode('MidPos x')))
+                            self.availabledatalist.append((unicode('Ellipse'),unicode(str(par.Num)),unicode('MidPos y')))
+                            self.availabledatalist.append((unicode('Ellipse'),unicode(str(par.Num)),unicode('Size a')))
+                            self.availabledatalist.append((unicode('Ellipse'),unicode(str(par.Num)),unicode('Size b')))
+                            self.availabledatalist.append((unicode('Ellipse'),unicode(str(par.Num)),unicode('Angle')))
+
+                        if isinstance(self.itemlist[listpos],config.LinePar):
+                            #print  "is connect"
+                            par=config.LinePar()
+                            par=self.itemlist[listpos]
+                            self.availabledatalist.append((unicode('Connection'),unicode(str(par.Num)),unicode('Range x')))
+                            self.availabledatalist.append((unicode('Connection'),unicode(str(par.Num)),unicode('Range y')))
+                            self.availabledatalist.append((unicode('Connection'),unicode(str(par.Num)),unicode('Lenght')))
+
+                        if item=='LabJack U12':
+                            self.availabledatalist.append((unicode('IO-Modul'),unicode('Analog'),unicode('Diff1')))
+                            self.availabledatalist.append((unicode('IO-Modul'),unicode('Analog'),unicode('Diff2')))
+
+                if self.tofile:
+                    if not os.path.isfile(self.filename):
+                        print 'open file'
+                        self.fp=open(self.filename,'w',0)       
+                        self.WriteDataHead(self.fp,self.availabledatalist)
+                else:
+                    if self.fp:
+                        self.fp.close()
+                        self.fp=None
+
+                #print 'availabledatalist'
+                #print self.availabledatalist
+                #print 'toplotlist'
+                #print self.toplotlist
+
+                
             if USBModul=='LabJack U12':
                 #print 'get first device'
                 self.USBdevice=u12.U12()
@@ -363,25 +403,25 @@ class DataProtoProcess(multiprocessing.Process):
             plotlist=list()
             self.plotmarkerlist=list()
             #print self.toplotlist
-       
-            for listpos, item in enumerate(self.toplotlist):
-                self.toplot=self.toplotlist[listpos]
+
+            #for listpos, item in enumerate(self.toplotlist):
+            for listpos, item in enumerate(self.availabledatalist):
                 if listpos<len(self.data):
                     temp=self.data[listpos]
                 else:
                     temp=list()
                
                 time=self.timestamp
-                if self.toplot[0]=='Connection':
+                if item[0]=='Connection':
                     
                     linepar=config.LinePar()
                     epar1=config.EllipPar()
                     epar2=config.EllipPar()
-                    if self.GetConnectWithNum(self.connectlist,int(self.toplot[1])) == None:
+                    if self.GetConnectWithNum(self.connectlist,int(item[1])) == None:
                         #print 'no connect'
                         continue
                     else:
-                        linepar=self.GetConnectWithNum(self.connectlist,int(self.toplot[1]))
+                        linepar=self.GetConnectWithNum(self.connectlist,int(item[1]))
                     
                     if self.GetEllipWithNum(self.elliplist,linepar.Pt1)== None or self.GetEllipWithNum(self.elliplist,linepar.Pt2) == None:
                         #print 'no points'
@@ -394,38 +434,38 @@ class DataProtoProcess(multiprocessing.Process):
                     
                         
                     c=(rx**2.0+ry**2.0)**0.5
-                    if self.toplot[2]=='Range x':
+                    if item[2]=='Range x':
                         this=rx
-                    if self.toplot[2]=='Range y':
+                    if item[2]=='Range y':
                         this=ry
-                    if self.toplot[2]=='Lenght':
+                    if item[2]=='Lenght':
                         this=c
                     temp.append((time,this))
-                if self.toplot[0]=='Ellipse':
-                    if self.GetEllipWithNum(self.elliplist,int(self.toplot[1]))== None:
+                if item[0]=='Ellipse':
+                    if self.GetEllipWithNum(self.elliplist,int(item[1]))== None:
                         continue
                     else:
-                        epar=self.GetEllipWithNum(self.elliplist,int(self.toplot[1]))
+                        epar=self.GetEllipWithNum(self.elliplist,int(item[1]))
                         #correct position concerning cam calibration
 
-                        if self.toplot[2]=='MidPos x':
+                        if item[2]=='MidPos x':
                             this=epar.MidPos[0]
-                        if self.toplot[2]=='MidPos y':
+                        if item[2]=='MidPos y':
                             this=epar.MidPos[1]
-                        if self.toplot[2]=='Size a':
+                        if item[2]=='Size a':
                             this=epar.Size[0]
-                        if self.toplot[2]=='Size b':
+                        if item[2]=='Size b':
                             this=epar.Size[1]
-                        if self.toplot[2]=='Angle':
+                        if item[2]=='Angle':
                             this=epar.Angle
                         temp.append((time,this))
                 
-                if self.toplot[0]=='IO-Modul':
+                if item[0]=='IO-Modul':
 
-                    if self.toplot[2]=='Diff1':
+                    if item[2]=='Diff1':
                         result= self.USBdevice.eAnalogIn(8)
                         this=result['voltage']
-                    if self.toplot[2]=='Diff2':
+                    if item[2]=='Diff2':
                         result= self.USBdevice.eAnalogIn(9)
                         this=result['voltage']
                     temp.append((time,this))
@@ -446,28 +486,28 @@ class DataProtoProcess(multiprocessing.Process):
                     self.data[listpos]=temp
                 else:
                     self.data.append(temp)
-                    
-                line = plot.PolyLine(temp,colour=self.colours[listpos], width=1)
-                self.plotmarkerlist.append(line)
-                marker = plot.PolyMarker(temp, marker='circle',colour=self.colours[listpos],width=1, size=1)
-                self.plotmarkerlist.append(marker)
+##                if listpos<=1:    
+##                    line = plot.PolyLine(temp,colour=self.colours[listpos], width=1)
+##                    self.plotmarkerlist.append(line)
+##                    marker = plot.PolyMarker(temp, marker='circle',colour=self.colours[listpos],width=1, size=1)
+##                    self.plotmarkerlist.append(marker)
 
-            if self.tofile:
-                self.fp=open(self.filename,'a',0)
+            if self.fp:
+                #print 'write data'
                 self.fp.writelines(string+'\n')
 
             #resultstring=resultstring+string+'\n'
 
             
-            
+        
 
-
-            for i in range(len(self.data)):
-                
-                line = plot.PolyLine(self.data[i],colour=self.colours[i], width=1)
-                plotlist.append(line)
-                marker = plot.PolyMarker(self.data[i], marker='circle',colour=self.colours[i],width=1, size=1)
-                plotlist.append(marker)
+            for i, itemtoplot in enumerate(self.toplotlist):
+                datapos=self.availabledatalist.index(itemtoplot)
+                #print datapos
+                line = plot.PolyLine(self.data[datapos],colour=self.colours[i], width=1)
+                self.plotmarkerlist.append(line)
+                marker = plot.PolyMarker(self.data[datapos], marker='circle',colour=self.colours[i],width=1, size=1)
+                self.plotmarkerlist.append(marker)
 
             try:
                 self.resultqueue.put((self.plotmarkerlist,self.elliplist, self.connectlist),False)
@@ -476,6 +516,15 @@ class DataProtoProcess(multiprocessing.Process):
                 pass
                     
             #self.dataqueue.task_done()
+    def WriteDataHead(self,fileinter,itemlist):
+        string=''
+        for i in range(len(itemlist)):
+            if i==0:
+                string='Time'+'\t'
+            else:
+                string=string+'\t'
+            string= string+str(itemlist[i])
+        fileinter.writelines(string+'\n')
     def GetEllipWithNum(self,liste,num):
         found=False
         for listpos, item in enumerate(liste):
