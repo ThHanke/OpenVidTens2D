@@ -2,6 +2,8 @@
 import wx,cv2,numpy,os
 import threading
 
+import VideoWriter
+
 
 import math
 import pickle
@@ -380,6 +382,7 @@ class ProcessPicThread(multiprocessing.Process):
 
         self.recordstream=False
         self.capturing=False
+        self.recordqueue=multiprocessing.Queue()
         self.replot=False
 
         self.lasttime=0
@@ -400,8 +403,7 @@ class ProcessPicThread(multiprocessing.Process):
         self.raw=None
 
         self.videofilename=''
-        self.videofilepart=1
-        self.daemon=True
+        #self.daemon=True
 
 
         #chessbordprops
@@ -511,11 +513,13 @@ class ProcessPicThread(multiprocessing.Process):
                     overview=cv2.cvtColor(overview,cv2.cv.CV_BGR2RGB)
                     cv2.imwrite(name+'_Overview'+'.png',overview)
                     if self.recordstream:
-                        self.videowriter=cv2.VideoWriter(self.videofilename+'.avi',fourcc,30,(self.raw.shape[1],self.raw.shape[0]),isColor=False)
+                        self.videowriterProcess=VideoWriter.VideoWriterProcess(self.videofilename,fourcc,self.recordqueue)
+                        #self.videowriter=cv2.VideoWriter(self.videofilename+'.avi',fourcc,30,(self.raw.shape[1],self.raw.shape[0]),isColor=False)
                     self.capturing=True
                 if msg=='Stopped Capturing':
                     if self.recordstream:
-                        self.videowriter.release()
+                        #self.videowriter.release()
+                        self.recordqueue.put('TERMINATE')
                         self.videofilepart=1
                     #print 'Stopped'
                     self.capturing=False
@@ -622,19 +626,13 @@ class ProcessPicThread(multiprocessing.Process):
                 
 
             #capture videostream
+                
             if self.recordstream and self.capturing:
-                #check filesize
-                if self.videofilepart==1:
-                    filesize=os.path.getsize(self.videofilename+'.avi')
-                else:
-                    filesize=os.path.getsize(self.videofilename+'part'+str(self.videofilepart)+'.avi')
-                    
-                if filesize>=4294967296: #4GB
-                    self.videowriter.release()
-                    self.videofilepart+=1
-                    self.videowriter=cv2.VideoWriter(self.videofilename+'part'+str(self.videofilepart)+'.avi',fourcc,30,(self.raw.shape[1],self.raw.shape[0]),isColor=False)
-                    
-                self.videowriter.write(self.raw)
+
+                #if self.videowriter.isOpened():
+                    #self.videowriter.write(self.raw)
+                if isinstance(self.videowriterProcess,VideoWriter.VideoWriterProcess):
+                    self.recordqueue.put(numpy.copy(self.raw))
                 #print 'recording'
                 #print self.videowriter
 
@@ -753,14 +751,14 @@ class ProcessPicThread(multiprocessing.Process):
                             #    continue
                             found=1
                             #cv2.rectangle(self.image,(searchrecttr[0],searchrecttr[1]),(int(searchrecttr[0]+searchrecttr[2]),int(searchrecttr[1]+searchrecttr[3])),(0,255,0),1)
-                            print 'found'
+                            #print 'found'
                             EllipParnew.searchrect=searchrect
                             break
                         else:
-                            print 'ellip smaller then 1/5 of searchrect'
+                            #print 'ellip smaller then 1/5 of searchrect'
                             pass
                     else:
-                        print 'ellip not in searchrect'
+                        #print 'ellip not in searchrect'
                         pass
                     
 
@@ -775,7 +773,7 @@ class ProcessPicThread(multiprocessing.Process):
             
             
         if found>=1:
-            print 'found ellip'
+            #print 'found ellip'
             return EllipParnew
         else:
             return None
@@ -853,12 +851,13 @@ class ProcessPicThread(multiprocessing.Process):
 
 
             ellipnew=self.FindEllip(rectlist,ellip,image)
+            #print ellipnew
             if ellipnew!=None:
                 #print ellipnew.mov[0],ellipnew.mov[1],fxmean,fymean,fx,fy
                 #print ellipnew.mov[0]-fxmean,ellipnew.mov[1]-fymean,ellipnew.mov[0]-fx,ellipnew.mov[1]-fy,ellipnew.mov[0]-fxm,ellipnew.mov[1]-fym
                 elliplistnew.append(ellipnew)
             else:
-                print 'lost mark'
+                #print 'lost mark'
                 pass
 
             
@@ -892,15 +891,15 @@ class ProcessPicThread(multiprocessing.Process):
                 for contour in contours:
                     
                     
-                    if len(contour) <= 6:
-                        print 'too few countour points'
+                    if len(contour) <= 5:
+                        #print 'too few countour points'
                         continue
                     
                     if cv2.contourArea(contour)<=(rectimage.shape[1]*rectimage.shape[0]/50):
-                        print 'contour area to small'
+                        #print 'contour area to small'
                         continue
                     if cv2.contourArea(contour)>(rectimage.shape[1]*rectimage.shape[0]):
-                        print 'contour area to big'
+                        #print 'contour area to big'
                         continue
 
                     #find bounding box of contour
@@ -921,12 +920,12 @@ class ProcessPicThread(multiprocessing.Process):
 
                     cv2.rectangle(contimage,(elliprect[0],elliprect[1]),(elliprect[0]+elliprect[2],elliprect[1]+elliprect[3] ),(125,125,125))
 
-                    image[0:0+contimage.shape[0], 0:0+contimage.shape[1]]=contimage
+                    #image[0:0+contimage.shape[0], 0:0+contimage.shape[1]]=contimage
 
                     #check if ellip is in searchrect
 
                     if elliprect[0]<0 or elliprect[1]<0 or elliprect[0]+elliprect[2]>=contimage.shape[1] or elliprect[1]+elliprect[3]>=contimage.shape[0] or elliprect[2]<(contimage.shape[1]/3) or elliprect[3]<(contimage.shape[0]/3):
-                        print 'fitted shape in contact with border or excedes'
+                        #print 'fitted shape in contact with border or excedes'
                         continue
                     else:
                         #define Number
@@ -940,18 +939,18 @@ class ProcessPicThread(multiprocessing.Process):
                         EllipParnew.mov=EllipParnew.MidPos[0]-ellip.MidPos[0],EllipParnew.MidPos[1]-ellip.MidPos[1]
 
                         found=1
-                        print 'found'
+                        #print 'found'
                         EllipParnew.searchrect=searchrect
                         break   
                 
                     
                 if found>=1:
-                    print 'Found new Ellip'
+                    #print 'Found new Ellip'
                     if pos!=0:
                         
                         #image[searchrect[1]:searchrect[1]+searchrect[3], searchrect[0]:searchrect[0]+searchrect[2]]=cv2.resize(rectimage,(rectimage.shape[1]/5,rectimage.shape[0]/5),interpolation=cv2.INTER_CUBIC)
                         pass
-                        
+                    #print EllipParnew    
                     return EllipParnew
 
         #cv2.rectangle(image,(rect[0],rect[1]),(int(rect[0]+rect[2]),int(rect[1]+rect[3])),(255,255,255),1)
@@ -1258,12 +1257,12 @@ class ProcessPicThread(multiprocessing.Process):
             temp=cv2.medianBlur(temp,3)
             thresimg=cv2.resize(temp,(temp.shape[1]*5,temp.shape[0]*5),interpolation=cv2.INTER_CUBIC)
 
-            ret,thresimg=cv2.threshold(thresimg,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
-##            pixin, pixout=self.InOutVal(thresimg)
-##            if abs(pixin-pixout)<10:
-##                #print 'grayscale gradient <10'
-##                return None,None
-##            ret,thresimg=cv2.threshold(thresimg,int((pixin+pixout)/2),255,cv2.THRESH_BINARY)
+            ##ret,thresimg=cv2.threshold(thresimg,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+            pixin, pixout=self.InOutVal(thresimg)
+            if abs(pixin-pixout)<10:
+                #print 'grayscale gradient <10'
+                return None,None
+            ret,thresimg=cv2.threshold(thresimg,int((pixin+pixout)/2),255,cv2.THRESH_BINARY)
             #print 'return subimage'
             return thresimg, rect
     def InOutVal(self,img):
