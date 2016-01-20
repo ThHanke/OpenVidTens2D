@@ -70,7 +70,7 @@ class InitFrame(wx.Frame):
         
 class App(wx.App):
     def OnInit(self):
-        
+        self.locale = wx.Locale(wx.LANGUAGE_ENGLISH)
         self.InitFrame=InitFrame(self)
         return True
 

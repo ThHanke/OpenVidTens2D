@@ -329,6 +329,7 @@ class DataProtoProcess(multiprocessing.Process):
             #print 'get actuall data form WInPlot'
             if self.pipeend.poll():
                 self.itemlist,self.toplotlist,self.tofile,self.filename,self.shouldclear,USBModul,plsexit=self.pipeend.recv()
+                #print self.itemlist
                 #print self.itemlist,self.toplotlist,self.tofile,self.filename,self.shouldclear,self.USBModul
 
                 self.availabledatalist=list()

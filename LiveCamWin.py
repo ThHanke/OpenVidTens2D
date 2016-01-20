@@ -657,7 +657,7 @@ class WinCamBmpPaintThread(threading.Thread):
     def run(self):
         while True:
             self.image=self.bmppaintqueue.get()
-            if self.image==None:
+            if not isinstance(self.image,numpy.ndarray):
                 break
             self.ResizeAndDraw(self.panel,self.image)
             self.bmppaintqueue.task_done()

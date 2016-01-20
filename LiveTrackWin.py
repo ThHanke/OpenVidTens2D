@@ -10,6 +10,7 @@ import pickle
 import Queue
 
 import multiprocessing
+from multiprocessing.pool import ThreadPool
 
 #import globals
 import config
@@ -380,6 +381,9 @@ class ProcessPicThread(multiprocessing.Process):
         self.bmpqueue=bmpplotqueue
         self.out_queue2=resultqueuedata
 
+        self.threadn = cv2.getNumberOfCPUs()
+        
+
         self.recordstream=False
         self.capturing=False
         self.recordqueue=multiprocessing.Queue()
@@ -417,6 +421,8 @@ class ProcessPicThread(multiprocessing.Process):
 
         # start the thread
     def run(self):
+        print 'created pool of '+str(self.threadn)+' workers!'
+        self.threadpool=ThreadPool(processes=self.threadn)
         while True:
             self.newelliplist=list()
             self.newconnectlist=list()
@@ -441,7 +447,16 @@ class ProcessPicThread(multiprocessing.Process):
                             #print 'pick ellip'
                             ellip=self.PickEllip(self.raw,self.newellip[0],self.newellip[1],self.elliplist)    
                             if not ellip==None:
-                                self.elliplist.append(ellip)
+                                
+                                if len(self.elliplist)<=(ellip.Num):
+                                    self.elliplist.append(ellip)
+                                else:
+                                    #put in in right sequenz
+                                    for listpos,item in enumerate(self.elliplist):
+                                        if item.Num>ellip.Num:
+                                            self.elliplist.insert(listpos,ellip)
+                                            break
+                                    
                                 #print 'new ellip found'
                                 self.pipeend.send('New Mark found!')
                             self.newellip=None
@@ -467,7 +482,16 @@ class ProcessPicThread(multiprocessing.Process):
                             newcon.Num=self.NumConnect(self.connectlist)
                             #print "connection appended"
                             self.pipeend.send('New connection in place!')
-                            self.connectlist.append(newcon)
+
+                            if len(self.connectlist)<=(newcon.Num):
+                                    self.connectlist.append(newcon)
+                            else:
+                                #put in in right sequenz
+                                for listpos,item in enumerate(self.connectlist):
+                                    if item.Num>newcon.Num:
+                                        self.connectlist.insert(listpos,newcon)
+                                        break
+
 
                         if newcon.Pt1==newcon.Pt2 and newcon.Pt1!=None and newcon.Pt1!=None:
                             
@@ -701,18 +725,18 @@ class ProcessPicThread(multiprocessing.Process):
                 break
             #print 'get search contour image'
             rectimage,searchrect=self.GetSearchCounturImage(image,searchrectr)
-            if rectimage==None:
+            if not isinstance(rectimage,numpy.ndarray):
                 continue
 
             
             #print 'search image created'
-            if rectimage==None:
+            if not isinstance(self.image,numpy.ndarray):
                 continue
             #pixout,pixin=self.InOutVal(rectimage)
             if cv2.countNonZero(rectimage)<=10:
                 continue
 
-            contours,hier=cv2.findContours (rectimage,cv2.RETR_LIST,cv2.CHAIN_APPROX_TC89_KCOS)
+            img2,contours,hier=cv2.findContours (rectimage,cv2.RETR_LIST,cv2.CHAIN_APPROX_TC89_KCOS)
             found=0
             #print 'find contours'
             
@@ -780,25 +804,21 @@ class ProcessPicThread(multiprocessing.Process):
 
 
     def PickAll(self,gray):
-        try:
-            circles=cv2.HoughCircles(gray, cv2.CV_HOUGH_GRADIENT,2,int(gray.shape[1]/20), 192, 50)
-            print circles
-        except:
-            #print 'null pointer bla bla'
-            return
-##        for i in range(0,storage.rows):
-##                row=list()
-##                for j in range(0,storage.cols):
-##                    ellip=self.PickEllip(self.raw,int(storage[i,j][0]),int(storage[i,j][1]),self.elliplist)    
-##                    if not ellip==None:
+        circles=cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT,2,int(gray.shape[1]/20), 192, 50,int(gray.shape[0]/100))
+        print circles
+
+        for i in circles[0,:]:
+            ellip=self.PickEllip(self.raw,int(i[0]),int(i[1]),self.elliplist)    
+            if not ellip==None:
 ##                        #print 'is regular ellip'
-##                        self.elliplist.append(ellip)
+                self.elliplist.append(ellip)
         
         
     def TrackEllip(self,image,ellipses):
         
         elliplistnew=list()
         #print len(ellipses)
+        tasklist=list()
         for listpos, item in enumerate(ellipses):
             #print 'track ellip'
             triedtorescue=False
@@ -831,8 +851,8 @@ class ProcessPicThread(multiprocessing.Process):
                 #scale down to make it faster
                 oldimg=cv2.resize(self.oldimage[flowrect[1]:flowrect[1]+flowrect[3], flowrect[0]:flowrect[0]+flowrect[2]],None,fx=0.25,fy=0.25)
                 newimg=cv2.resize(self.raw[flowrect[1]:flowrect[1]+flowrect[3], flowrect[0]:flowrect[0]+flowrect[2]],None,fx=0.25,fy=0.25)
+                flow = cv2.calcOpticalFlowFarneback(oldimg, newimg,None,0.5, 3, 15, 3, 5, 1.2,0)
                 
-                flow = cv2.calcOpticalFlowFarneback(oldimg, newimg, 0.5, 3, 15, 3, 5, 1.2, 0)
                 #x,y=int(newimg.shape[1]/2),int(newimg.shape[0]/2)
                 #fx, fy = flow[y,x].T
                 #fxm,fym=flow[:,:,0].mean(),flow[:,:,1].mean()
@@ -848,10 +868,23 @@ class ProcessPicThread(multiprocessing.Process):
                 firstsearchrect = (int(ellip.MidPos[0]-b/2),int(ellip.MidPos[1]-h/2),int(b),int(h))
                 rectlist=self.SearchrectList(firstsearchrect,(0, 0))
 
-
-
-            ellipnew=self.FindEllip(rectlist,ellip,image)
-            #print ellipnew
+            
+            task=self.threadpool.apply_async(self.FindEllip,(rectlist,ellip,image))
+            tasklist.append(task)
+##            ellipnew=self.FindEllip(rectlist,ellip,image)
+##            #print ellipnew
+##            if ellipnew!=None:
+##                #print ellipnew.mov[0],ellipnew.mov[1],fxmean,fymean,fx,fy
+##                #print ellipnew.mov[0]-fxmean,ellipnew.mov[1]-fymean,ellipnew.mov[0]-fx,ellipnew.mov[1]-fy,ellipnew.mov[0]-fxm,ellipnew.mov[1]-fym
+##                elliplistnew.append(ellipnew)
+##            else:
+##                #print 'lost mark'
+##                pass
+##            
+        for task in tasklist:
+            task.wait() #wait till task is completed and result available
+            #print task.get()
+            ellipnew=task.get()
             if ellipnew!=None:
                 #print ellipnew.mov[0],ellipnew.mov[1],fxmean,fymean,fx,fy
                 #print ellipnew.mov[0]-fxmean,ellipnew.mov[1]-fymean,ellipnew.mov[0]-fx,ellipnew.mov[1]-fy,ellipnew.mov[0]-fxm,ellipnew.mov[1]-fym
@@ -859,7 +892,6 @@ class ProcessPicThread(multiprocessing.Process):
             else:
                 #print 'lost mark'
                 pass
-
             
 
             #for rect in rectlist:
@@ -874,7 +906,7 @@ class ProcessPicThread(multiprocessing.Process):
         for pos,rect in enumerate(rectlist):
                 #print pos
                 rectimage, searchrect=self.GetSearchCounturImage(image,rect)
-                if rectimage==None:
+                if not isinstance(rectimage,numpy.ndarray):
                     continue
 
 
@@ -882,7 +914,7 @@ class ProcessPicThread(multiprocessing.Process):
                 #    continue
                 
                 #contours,hier=cv2.findContours(rectimage.copy(), cv2.RETR_LIST,cv2.CHAIN_APPROX_TC89_KCOS)
-                contours,hier=cv2.findContours(rectimage.copy(), cv2.RETR_CCOMP,cv2.CHAIN_APPROX_TC89_KCOS)
+                im2,contours,hier=cv2.findContours(rectimage.copy(), cv2.RETR_CCOMP,cv2.CHAIN_APPROX_TC89_KCOS)
                 contimage=numpy.zeros(rectimage.shape)
                 cv2.drawContours(contimage,contours,-1,(255,255,255))
                 # hier[3] is here always -1 for white spots on black ground and 0 for black spots on white ground
@@ -1140,50 +1172,9 @@ class ProcessPicThread(multiprocessing.Process):
 
 
         #add original rect
-        #rectlist.append(searchrect)
-        rectlist=self.RescueList(searchrect,mov)
+        rectlist.append(searchrect)
+        #rectlist=self.RescueList(searchrect,mov)
 
-##        #width=int(searchrect[2]*(1+abs(bfactor*0.04)))
-##        #height=int(searchrect[3]*(1+abs(bfactor*0.04)))
-##        width=searchrect[2]
-##        height=searchrect[3]
-##
-##        lenmove=math.sqrt(mov[0]**2+mov[1]**2)
-##        if lenmove>0:
-##            vect=mov[0]/lenmove,mov[1]/lenmove
-##            vectortho=mov[1]/lenmove,mov[0]/lenmove
-##        else:
-##            vect=0,0
-##            vectortho=0,0
-##        print mov,vect
-##        #print 'mov'
-##        #print mov
-##        #print 'vectortho'
-##        #print vectortho
-##            
-##        if lenmove<0.0:
-##            print 'use circular list'
-##            rectlist=self.RescueList(searchrect,mov)
-##        else:
-##            factors=range(-2,2)
-##            bfactors=range(0,10,2)
-##
-##            for bfactor in bfactors:
-##
-##
-##                for factor in factors:
-##                    #offstraight=factor*lenmove/2*vectortho[0],factor*lenmove/2*vectortho[1]
-##                    offstraight=0,0
-##                    #print 'offstraight'
-##                    #print offstraight
-##                    
-##
-##                    
-##
-##                    temp=int(searchrect[0]+searchrect[2]/2+vect[0]/10*bfactor-width/2+offstraight[0]),int(searchrect[1]+searchrect[3]/2+vect[1]/10*bfactor-height/2+offstraight[1]),width,height
-##                    rectlist.append(temp)
-##                    temp=int(searchrect[0]+searchrect[2]/2-vect[0]/10*bfactor-width/2+offstraight[0]),int(searchrect[1]+searchrect[3]/2-vect[1]/10*bfactor-height/2+offstraight[1]),width,height
-##                    rectlist.append(temp)
                     
 
                  
