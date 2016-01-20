@@ -37,7 +37,7 @@ class LiveCamWin(wx.Frame):
         self.fileismovie=False
         self.datatoqueue=list()
 
-        self.aquirequeue=Queue.Queue(1)
+        self.aquirequeue=Queue.Queue(10)
         self.totrackqueue=totrackqueue
         self.pipetotrack=pipetotrack
         self.bmppaintqueue=Queue.LifoQueue(1)
@@ -45,13 +45,14 @@ class LiveCamWin(wx.Frame):
         self.lasttime=0
         self.acttime=0
         self.framecount=0
+        self.gothrough=False
 
         self.childs=list()
         self.panel=None
         
         self.pollpipetotracktimer=wx.Timer(self)
         self.Bind(wx.EVT_TIMER,self.PollPipeToTrack,self.pollpipetotracktimer)
-        self.pollpipetotracktimer.Start(20)
+        self.pollpipetotracktimer.Start(1)
         
 
         if self.InitVidCapCamera():
@@ -102,7 +103,7 @@ class LiveCamWin(wx.Frame):
 
         self.SetMenuBar(self.Menubar)
     def PollPipeToTrack(self,event):
-        if self.pipetotrack.poll():
+        if self.pipetotrack.poll(False):
             result=self.pipetotrack.recv()
             #print result
             if result=='Replot':
@@ -110,13 +111,19 @@ class LiveCamWin(wx.Frame):
                     self.OnSlider(True,self.imageslider.GetValue())
             if result=='Stop gothrough':
                 self.gothrough=False
-            if result=='Next Frame pls':
-                if self.isfileinterface:
-                    if self.gothrough:
-                        if self.imageslider.GetValue()<self.imageslider.GetMax():
-                            self.OnSlider(True,self.imageslider.GetValue()+1)
-                        else:
-                            self.gothrough=False
+                
+##                if result=='Next Frame pls':
+##                    if self.isfileinterface:
+##                        if self.gothrough:
+##                            if self.imageslider.GetValue()<self.imageslider.GetMax():
+##                                self.OnSlider(True,self.imageslider.GetValue()+1)
+##                            else:
+##                                self.gothrough=False
+        if self.gothrough:
+            if self.imageslider.GetValue()<self.imageslider.GetMax():
+                self.OnSlider(True,self.imageslider.GetValue()+1)
+            else:
+                self.gothrough=False
         
                 
     def CleanUpBeforeInterfaceSwitch(self):
@@ -507,12 +514,14 @@ class LiveCamWin(wx.Frame):
             self.acttime=clock()
 
         #print 'send file to aquire'
-        self.aquirequeue.put((self.imageslider.GetValue(), self.image, False),False)
+        self.aquirequeue.put((self.imageslider.GetValue(), self.image, False),True)
+        return True
             
         
     def GoThrough(self,event):
-        self.OnSlider(True,self.imageslider.GetValue())
         self.gothrough=True
+
+
 
     def OnClose(self, event):
         if self.caminterface!=None:
@@ -560,7 +569,8 @@ class QueuePicThread(threading.Thread):
                 #print 'winCam1 bmppaintqueue is full'
 
             try:
-                self.totrackqueue.put((self.timestamp,self.gray),False)
+                self.totrackqueue.put((self.timestamp,self.gray),True)
+                #if true will block till free slot is available
             except Queue.Full:
                 pass
                 #print 'totrackqueue is full'
@@ -628,7 +638,7 @@ class VidCapQueuePicThread(threading.Thread):
                         #print self.timestamp
                     except Queue.Full:
                         pass
-                        #print 'totrackqueue is full'
+                        print 'totrackqueue is full'
 
                     try:
                         #self.bmppaintqueue.put((temp),False)
@@ -661,6 +671,7 @@ class WinCamBmpPaintThread(threading.Thread):
                 break
             self.ResizeAndDraw(self.panel,self.image)
             self.bmppaintqueue.task_done()
+            sleep(0.03)
 
     def onPaint(self,event):
         #print 'Panel Paint event'
