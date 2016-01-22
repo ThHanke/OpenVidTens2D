@@ -1,10 +1,5 @@
 from distutils.core import setup
-import py2exe
-
-
 import sys
-
-import numpy
 
 sys.argv = ["blah","py2exe"]
 
@@ -50,7 +45,7 @@ setup(data_files = [('', ['calicon.png',
                             }
                  },
       zipfile=None,
-      console=['OpenVidTens2D.py']
+      console=['OpenVidTens2D.py'], requires=['bbfreeze', 'cv2', 'numpy', 'py2exe']
       
       )
 

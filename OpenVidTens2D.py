@@ -1,6 +1,5 @@
 # -*- coding: cp1252 -*-
 import wx
-import sys
 
 from time import sleep
 

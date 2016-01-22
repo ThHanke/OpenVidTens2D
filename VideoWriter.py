@@ -20,7 +20,7 @@ class VideoWriterProcess(Process):
 ##            
             msg=self.queue.get()
             if msg=='TERMINATE':
-                if self.videowriter!=None:
+                if self.videowriter is not None:
                     self.videowriter.release()
                     while self.videowriter.isOpened():
                         print 'wait till videowriter is released'
@@ -28,7 +28,7 @@ class VideoWriterProcess(Process):
                 break
             
             else:
-                if self.videowriter==None:
+                if self.videowriter is None:
                     print 'open video writer'
                     self.videowriter=VideoWriter(self.filename+'.'+str(self.videofilepart).rjust(2,'0')+'.avi',self.fourcc,30,(msg.shape[1],msg.shape[0]),isColor=False)
                     #self.videowriter.open(self.filename+'.'+str(self.videofilepart).rjust(2,'0')+'.avi',fourcc,30,(self.raw.shape[1],self.raw.shape[0]),isColor=False)

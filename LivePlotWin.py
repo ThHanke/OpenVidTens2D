@@ -14,11 +14,9 @@ else:
 
 
 import os
-import pickle
-
 import wx.lib.plot as plot
 
-from time import clock,sleep
+from time import clock
 
 #import globals
 import config
@@ -103,18 +101,18 @@ class LivePlotWin(wx.Frame):
         #spawn pool of threads
         DataProtoProcess(self.childendpipe,self.trackresultqueue,self.plotwritequeue)
         self.ExitBackground=False
-        self.SendStatustoBackgroundProcess()
+        self.sendstatustobackgroundprocess()
         
         #spawn pool of threads
         PlotWriteThread(self,self.parentendpipe,self.plotwritequeue)
 
-        self.startbutton.Bind(wx.EVT_BUTTON, self.OnStart)
-        self.stopbutton.Bind(wx.EVT_BUTTON, self.OnStop)
-        self.clearbutton.Bind(wx.EVT_BUTTON, self.OnClear)
-        self.usbmodulbox.Bind(wx.EVT_CHOICE,self.OnUSBModul)
+        self.startbutton.Bind(wx.EVT_BUTTON, self.onstart)
+        self.stopbutton.Bind(wx.EVT_BUTTON, self.onstop)
+        self.clearbutton.Bind(wx.EVT_BUTTON, self.onclear)
+        self.usbmodulbox.Bind(wx.EVT_CHOICE,self.onusbmodul)
 
 
-        self.tree.Bind(wx.EVT_TREE_SEL_CHANGED,self.OnSelChanged)
+        self.tree.Bind(wx.EVT_TREE_SEL_CHANGED,self.onselchanged)
 
 
         self.imageslist=wx.ImageList(16,16)
@@ -132,10 +130,10 @@ class LivePlotWin(wx.Frame):
 
         self.Layout()
         self.Show()
-    def SendStatustoBackgroundProcess(self):
+    def sendstatustobackgroundprocess(self):
         #print self.tofile,self.filename
         self.parentendpipe.send((self.itemlist,self.toplotlist,self.tofile,self.filename,self.shouldclear,self.USBModul,self.ExitBackground))
-    def OnStart(self,event):
+    def onstart(self,event):
         
         self.tofile=True
         self.filename=self.filetext.GetValue()
@@ -164,38 +162,38 @@ class LivePlotWin(wx.Frame):
         self.capturestarttime=clock()
         #self.data=list()
         #print 'send to background data process'
-        self.SendStatustoBackgroundProcess()
+        self.sendstatustobackgroundprocess()
         
-    def WriteDataHead(self,fileinter):
+    def writedatahead(self,fileinter):
         string=''
         for i in range(len(self.toplotlist)):
             if i==0:
                 string='Time'+'\t'
             else:
-                string=string+'\t'
-            string= string+str(self.toplotlist[i])
+                string+='\t'
+            string+=str(self.toplotlist[i])
         fileinter.writelines(string+'\n')
         
-    def OnStop(self,event):
+    def onstop(self,event):
         self.pipetotrack.send('Stopped Capturing')
         self.tofile=False
 
-        self.SendStatustoBackgroundProcess()
+        self.sendstatustobackgroundprocess()
         
         self.fp=None
         self.SetStatusText('Stopped Capturing')
-    def OnClear(self,event):
+    def onclear(self,event):
         self.shouldclear=True
-        self.SendStatustoBackgroundProcess()
+        self.sendstatustobackgroundprocess()
         self.shouldclear=False
         self.SetStatusText('Cleared live plot')
-    def OnUSBModul(self,event):
+    def onusbmodul(self,event):
         self.USBModul=event.GetString()
-        self.BuildTreeCtrl()
+        self.buildtreectrl()
 
-    def OnSelChanging(self,event):
+    def onselchanging(self,event):
         pass
-    def OnSelChanged(self,event):
+    def onselchanged(self,event):
         try:
             treesel=self.tree.GetSelections()
         except:
@@ -216,11 +214,11 @@ class LivePlotWin(wx.Frame):
                             this=self.tree.GetItemText(parent),self.tree.GetItemText(item),self.tree.GetItemText(subitem)
                             self.toplotlist.append(this)
         #print self.toplotlist
-        self.SendStatustoBackgroundProcess()
+        self.sendstatustobackgroundprocess()
         #print 'changes where send'
             
 
-    def BuildTreeCtrl(self):
+    def buildtreectrl(self):
         #print "rebuild tree items" 
        # print self.itemlist
         #add measure modul signals
@@ -229,15 +227,15 @@ class LivePlotWin(wx.Frame):
         if self.USBModul=='None' and ('LabJack U12'in self.itemlist):
             self.itemlist.remove('LabJack U12')
         self.tree.DeleteAllItems()
-        Element = self.tree.AddRoot('Element')
+        element = self.tree.AddRoot('Element')
         if len(self.itemlist)>0:
             for listpos, item in enumerate(self.itemlist):
                 if isinstance(self.itemlist[listpos],config.EllipPar):
                     #print "is ellip"
                     par=config.EllipPar()
                     par=self.itemlist[listpos]
-                    Ellipse=self.tree.AppendItem(Element,'Ellipse')
-                    this=self.tree.AppendItem(Ellipse,str(par.Num))
+                    ellipse=self.tree.AppendItem(element,'Ellipse')
+                    this=self.tree.AppendItem(ellipse,str(par.Num))
                     c1=self.tree.AppendItem(this,'MidPos x')
 
                     c2=self.tree.AppendItem(this,'MidPos y')
@@ -249,26 +247,26 @@ class LivePlotWin(wx.Frame):
                     #print  "is connect"
                     par=config.LinePar()
                     par=self.itemlist[listpos]
-                    Connection=self.tree.AppendItem(Element,'Connection')
-                    this=self.tree.AppendItem(Connection,str(par.Num))
+                    connection=self.tree.AppendItem(element,'Connection')
+                    this=self.tree.AppendItem(connection,str(par.Num))
                     c1=self.tree.AppendItem(this,'Range x')
 
                     c2=self.tree.AppendItem(this,'Range y')
 
                     c3=self.tree.AppendItem(this,'Lenght')
                 if item=='LabJack U12':
-                    Modul=self.tree.AppendItem(Element,'IO-Modul')
-                    this=self.tree.AppendItem(Modul,'Analog')
+                    modul=self.tree.AppendItem(element,'IO-Modul')
+                    this=self.tree.AppendItem(modul,'Analog')
                     c1=self.tree.AppendItem(this,'Diff1')
                     c2=self.tree.AppendItem(this,'Diff2')
                     
 
                     #print len(self.itemlist),len(elliplist),len(connectlist)
-        self.RecallTreeSelection()
+        self.recalltreeselection()
         self.tree.ExpandAll()
         
 
-    def RecallTreeSelection(self):
+    def recalltreeselection(self):
         #print 'mark previously selected'
         self.tree.UnselectAll()
         root=self.tree.GetRootItem()
@@ -287,11 +285,11 @@ class LivePlotWin(wx.Frame):
                     grandchild=self.tree.GetNextChild(grandchild[0],grandchild[1])
                 child=self.tree.GetNextChild(child[0],child[1])
 
-    def OnClose(self,event):
+    def onclose(self,event):
         self.ExitBackground=True
-        self.SendStatustoBackgroundProcess()
+        self.sendstatustobackgroundprocess()
         for item in self.childs:
-            item.OnClose(True)
+            item.onclose(True)
         self.Destroy()
 
 class DataProtoProcess(multiprocessing.Process):
@@ -303,20 +301,24 @@ class DataProtoProcess(multiprocessing.Process):
         self.pipeend=pipeend
         self.dataqueue=dataqueue
         self.resultqueue=resultqueue
+        self.availabledatalist=list()
         self.data=list()
 ##        self.tofile=False
-##        self.filename=None
+        self.filename=None
+        self.image=None
         self.fp=None
 ##        self.daemon=True
         self.itemlist=list()
         self.toplotlist=list()
         self.tofile=False
+        self.shouldclear=False
         self.USBdevice=None
 
         self.elliplist, self.connectlist=list(),list()
 
         self.colours=('BLACK','RED','BLUE','GREEN','PINK','YELLOW','CYAN','PEACHPUFF','TURQUOSE','DARKRED','DARKBLUE','DARKGREEN','IVORY','MINTCREAM','NAVY','SEAGREEN','GOLD','SALMON','MAROON','PURPLE')
-             
+        self.plotmarkerlist=list()
+
         self.start()
        
         
@@ -324,7 +326,7 @@ class DataProtoProcess(multiprocessing.Process):
     def run(self):
         #print "Aquirethread started "
         while True:
-            
+            plsexit=False
 
             #print 'get actuall data form WInPlot'
             if self.pipeend.poll():
@@ -363,7 +365,7 @@ class DataProtoProcess(multiprocessing.Process):
                     if not os.path.isfile(self.filename):
                         print 'open file'
                         self.fp=open(self.filename,'w',0)       
-                        self.WriteDataHead(self.fp,self.availabledatalist)
+                        self.writedatahead(self.fp,self.availabledatalist)
                 else:
                     if self.fp:
                         self.fp.close()
@@ -378,7 +380,7 @@ class DataProtoProcess(multiprocessing.Process):
             if USBModul=='LabJack U12':
                 #print 'get first device'
                 self.USBdevice=u12.U12()
-            if USBModul=='None' and self.USBdevice!=None:
+            if USBModul is 'None' and self.USBdevice is not None:
                 self.USBdevice=None
             if plsexit:
                 #print 'killing myself'
@@ -401,7 +403,6 @@ class DataProtoProcess(multiprocessing.Process):
                 self.shouldclear=False
           
             #plot selection and write to file
-            plotlist=list()
             self.plotmarkerlist=list()
             #print self.toplotlist
 
@@ -418,18 +419,18 @@ class DataProtoProcess(multiprocessing.Process):
                     linepar=config.LinePar()
                     epar1=config.EllipPar()
                     epar2=config.EllipPar()
-                    if self.GetConnectWithNum(self.connectlist,int(item[1])) == None:
+                    if self.getconnectwithnum(self.connectlist,int(item[1])) is None:
                         #print 'no connect'
                         continue
                     else:
-                        linepar=self.GetConnectWithNum(self.connectlist,int(item[1]))
+                        linepar=self.getconnectwithnum(self.connectlist,int(item[1]))
                     
-                    if self.GetEllipWithNum(self.elliplist,linepar.Pt1)== None or self.GetEllipWithNum(self.elliplist,linepar.Pt2) == None:
+                    if self.getellipwithnum(self.elliplist,linepar.Pt1) is None or self.getellipwithnum(self.elliplist,linepar.Pt2) is None:
                         #print 'no points'
                         continue
                     else:
-                        epar1=self.GetEllipWithNum(self.elliplist,linepar.Pt1)
-                        epar2=self.GetEllipWithNum(self.elliplist,linepar.Pt2)
+                        epar1=self.getellipwithnum(self.elliplist,linepar.Pt1)
+                        epar2=self.getellipwithnum(self.elliplist,linepar.Pt2)
 
                     rx,ry=abs(epar1.MidPos[0]-epar2.MidPos[0]),abs(epar1.MidPos[1]-epar2.MidPos[1])
                     
@@ -443,10 +444,10 @@ class DataProtoProcess(multiprocessing.Process):
                         this=c
                     temp.append((time,this))
                 if item[0]=='Ellipse':
-                    if self.GetEllipWithNum(self.elliplist,int(item[1]))== None:
+                    if self.getellipwithnum(self.elliplist,int(item[1])) is None:
                         continue
                     else:
-                        epar=self.GetEllipWithNum(self.elliplist,int(item[1]))
+                        epar=self.getellipwithnum(self.elliplist,int(item[1]))
                         #correct position concerning cam calibration
 
                         if item[2]=='MidPos x':
@@ -476,8 +477,8 @@ class DataProtoProcess(multiprocessing.Process):
                     if listpos==0:
                         string=str(time)+'\t'
                     else:
-                        string=string+'\t'
-                    string= string+str(this)
+                        string+='\t'
+                    string+=str(this)
 
                 
                 if len(temp)>200:
@@ -517,39 +518,29 @@ class DataProtoProcess(multiprocessing.Process):
                 pass
                     
             #self.dataqueue.task_done()
-    def WriteDataHead(self,fileinter,itemlist):
+    def writedatahead(self,fileinter,itemlist):
         string=''
         for i in range(len(itemlist)):
             if i==0:
                 string='Time'+'\t'
             else:
-                string=string+'\t'
-            string= string+str(itemlist[i])
+                string+='\t'
+            string+=str(itemlist[i])
         fileinter.writelines(string+'\n')
-    def GetEllipWithNum(self,liste,num):
-        found=False
+    def getellipwithnum(self,liste,num):
         for listpos, item in enumerate(liste):
             epar=config.EllipPar()
             epar=liste[listpos]
             if epar.Num==num:
-                found=True
-                break
-        if found:
-            return epar
-        else:
-            return None
-    def GetConnectWithNum(self,liste,num):
-        found=False
+                return epar
+        return None
+    def getconnectwithnum(self,liste,num):
         for listpos, item in enumerate(liste):
             linepar=config.LinePar()
             linepar=liste[listpos]
             if linepar.Num==num:
-                found=True
-                break
-        if found:
-            return linepar
-        else:
-            return None
+                return linepar
+        return None
 class PlotWriteThread(threading.Thread):
     """Background Worker Thread Class."""
 
@@ -563,6 +554,8 @@ class PlotWriteThread(threading.Thread):
         self.start()
         self.elliplist=list()
         self.connectlist=list()
+
+        self.plotlist=list()
         self.listlength=0
         # start the thread
 
@@ -582,7 +575,7 @@ class PlotWriteThread(threading.Thread):
                 self.parent.itemlist=list()
                 self.parent.itemlist.extend(self.elliplist)
                 self.parent.itemlist.extend(self.connectlist)
-                self.parent.BuildTreeCtrl()
+                self.parent.buildtreectrl()
                 self.listlength=len(self.elliplist)+len(self.connectlist)
 
             if len(self.plotlist)>0:
