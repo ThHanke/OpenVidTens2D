@@ -510,7 +510,10 @@ class DataProtoProcess(multiprocessing.Process):
             # resultstring=resultstring+string+'\n'
 
             for i, itemtoplot in enumerate(self.toplotlist):
-                datapos = self.availabledatalist.index(itemtoplot)
+                try:
+                    datapos = self.availabledatalist.index(itemtoplot)
+                except ValueError:
+                    break
                 # print datapos
                 line = plot.PolyLine(self.data[datapos], colour=self.colours[i], width=1)
                 self.plotmarkerlist.append(line)

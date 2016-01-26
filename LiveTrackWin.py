@@ -103,11 +103,20 @@ class LiveTrackWin(wx.Frame):
 
         self.childs = list()
 
-        ProcessPicThread(self.childendpipe, self.pipetoplot, self.totrackqueue, self.bmpplotqueue, self.toplotqueue, 0)
+        #add an otional viewer for dev pupose
+        import wxImageView
+        self.tracktoview, self.viewtotrack = multiprocessing.Pipe()
+        self.viewqueue = multiprocessing.Queue(5)
+        self.TestView=wxImageView.Frame(self.viewqueue,self.viewtotrack)
+        self.childs.append(self.TestView)
+
+        ProcessPicThread(self.childendpipe, self.pipetoplot, self.totrackqueue, self.bmpplotqueue, self.toplotqueue, self.viewqueue)
         # init variables in backgroundprocess
         # self.sendstatustobackgroundprocess()
 
         WinTrackBmpPaintThread(self, self.bmpplotqueue, self.panel, 0)
+
+
 
         self.Show()
 
@@ -377,7 +386,7 @@ class LiveTrackWin(wx.Frame):
 class ProcessPicThread(multiprocessing.Process):
     """Background Worker Thread Class."""
 
-    def __init__(self, pipeend, pipetoplot, piclistqueue, bmpplotqueue, resultqueuedata, num=0):
+    def __init__(self, pipeend, pipetoplot, piclistqueue, bmpplotqueue, resultqueuedata, viewqueue):
         """Init Worker Thread Class."""
         multiprocessing.Process.__init__(self)
         self.pipeend = pipeend
@@ -385,6 +394,7 @@ class ProcessPicThread(multiprocessing.Process):
         self.queue = piclistqueue
         self.bmpqueue = bmpplotqueue
         self.out_queue2 = resultqueuedata
+        self.viewqueue=viewqueue
 
         self.threadn = cv2.getNumberOfCPUs()
 
@@ -401,7 +411,6 @@ class ProcessPicThread(multiprocessing.Process):
 
         self.seachrectfactor = 15
 
-        self.num = num
         self.elliplist = list()
         self.connectlist = list()
         self.intrinsic, self.distortion = None, None
@@ -739,10 +748,12 @@ class ProcessPicThread(multiprocessing.Process):
                 continue
 
             img2, contours, hier = cv2.findContours(rectimage, cv2.RETR_LIST, cv2.CHAIN_APPROX_TC89_KCOS)
-            # print 'find contours'
+            print 'find contours'
+
 
             for contour in contours:
                 # print contour
+
                 if len(contour) >= 6:
                     # print type(contour),len(contour)
                     if cv2.contourArea(contour) <= (rectimage.shape[1] * rectimage.shape[0] / 50) or cv2.contourArea(
@@ -781,6 +792,7 @@ class ProcessPicThread(multiprocessing.Process):
                             # cv2.rectangle(self.image,(searchrecttr[0],searchrecttr[1]),(int(searchrecttr[0]+searchrecttr[2]),int(searchrecttr[1]+searchrecttr[3])),(0,255,0),1)
                             # print 'found'
                             ellipparnew.searchrect = searchrect
+
                             return ellipparnew
                         else:
                             # print 'ellip smaller then 1/5 of searchrect'
@@ -792,17 +804,20 @@ class ProcessPicThread(multiprocessing.Process):
         return None
 
     def pickall(self, gray):
-        circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, 2, int(gray.shape[1] / 20), 192, 50,
-                                   int(gray.shape[0] / 100))
-        print circles
+        circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, 2, int(gray.shape[1] / 25), 192, 50,
+                                   int(gray.shape[0] / 150),int(gray.shape[0] / 5))
+        #print circles
 
         for i in circles[0, :]:
             ellip = self.pickellip(self.raw, int(i[0]), int(i[1]), self.elliplist)
             if ellip is not None:
-                # print 'is regular ellip'
-                self.elliplist.append(ellip)
+                #print self.posinfoundellip(ellip.MidPos,self.elliplist)[0]
+                if not self.posinfoundellip(ellip.MidPos,self.elliplist)[0]:
+                    # print 'is regular ellip'
+                    self.elliplist.append(ellip)
 
     def trackellip(self, image, ellipses):
+
 
         elliplistnew = list()
         # print len(ellipses)
@@ -882,9 +897,8 @@ class ProcessPicThread(multiprocessing.Process):
             # print task.get()
             ellipnew = task.get()
             if ellipnew is not None:
-                # print ellipnew.mov[0],ellipnew.mov[1],fxmean,fymean,fx,fy
-                # print ellipnew.mov[0]-fxmean,ellipnew.mov[1]-fymean,ellipnew.mov[0]-fx,ellipnew.mov[1]-fy,ellipnew.mov[0]-fxm,ellipnew.mov[1]-fym
-                elliplistnew.append(ellipnew)
+                if not self.posinfoundellip(ellipnew.MidPos,elliplistnew)[0]:
+                    elliplistnew.append(ellipnew)
             else:
                 # print 'lost mark'
                 pass
@@ -906,14 +920,16 @@ class ProcessPicThread(multiprocessing.Process):
             # if cv2.countNonZero(rectimage)<=10:
             # continue
 
-            # contours,hier=cv2.findContours(rectimage.copy(), cv2.RETR_LIST,cv2.CHAIN_APPROX_TC89_KCOS)
-            im2, contours, hier = cv2.findContours(rectimage.copy(), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_TC89_KCOS)
-            contimage = numpy.zeros(rectimage.shape)
+            im2, contours, hier =cv2.findContours(rectimage.copy(), cv2.RETR_LIST,cv2.CHAIN_APPROX_TC89_KCOS)
+            #im2, contours, hier = cv2.findContours(rectimage.copy(), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_TC89_KCOS)
+            contimage = numpy.zeros_like(rectimage)
+            #print contimage.dtype
             cv2.drawContours(contimage, contours, -1, (255, 255, 255))
             # hier[3] is here always -1 for white spots on black ground and 0 for black spots on white ground
             # print hier
+            i=0
             for contour in contours:
-
+                i+=1
                 if len(contour) <= 5:
                     # print 'too few countour points'
                     continue
@@ -931,27 +947,22 @@ class ProcessPicThread(multiprocessing.Process):
                 cv2.rectangle(contimage, (conrect[0], conrect[1]), (conrect[0] + conrect[2], conrect[1] + conrect[3]),
                               (125, 255, 125))
                 # print self.checksubrect(contimage,conrect)
+                print i
+                arcscale=cv2.arcLength(contour,True)/(2*(conrect[2]+conrect[3]))
+                if arcscale>=0.9 or arcscale<0.3:
+                    print 'skipped'
+                    continue
+
 
                 # Fits ellipse to current contour.
                 ellipparnew = self.fitelliponcontour(contour)
 
-                # print EllipParnew.MidPos,EllipParnew.Size
 
-                b, h = self.getaabbellip(ellipparnew)
-                elliprect = (int(ellipparnew.MidPos[0] - b / 2), int(ellipparnew.MidPos[1] - h / 2), int(b), int(h))
-                # print contimage.shape[1],contimage.shape[0]
-                # print elliprect
+                #self.viewqueue.put((0,contimage),False)
 
-                cv2.rectangle(contimage, (elliprect[0], elliprect[1]),
-                              (elliprect[0] + elliprect[2], elliprect[1] + elliprect[3]), (125, 125, 125))
-
-                # image[0:0+contimage.shape[0], 0:0+contimage.shape[1]]=contimage
-
-                # check if ellip is in searchrect
-
-                if elliprect[0] < 0 or elliprect[1] < 0 or elliprect[0] + elliprect[2] >= contimage.shape[1] or \
-                    elliprect[1] + elliprect[3] >= contimage.shape[0] or elliprect[2] < (
-                        contimage.shape[1] / 3) or elliprect[3] < (contimage.shape[0] / 3):
+                if conrect[0] < 0 or conrect[1] < 0 or conrect[0] + conrect[2] >= contimage.shape[1] or \
+                    conrect[1] + conrect[3] >= contimage.shape[0] or conrect[2] < (
+                        contimage.shape[1] / 3) or conrect[3] < (contimage.shape[0] / 3):
                     # print 'fitted shape in contact with border or excedes'
                     continue
                 else:
@@ -968,6 +979,7 @@ class ProcessPicThread(multiprocessing.Process):
 
                     # print 'found'
                     ellipparnew.searchrect = searchrect
+                    #print cv2.isContourConvex(contour)
                     return ellipparnew
         return None
 
@@ -1251,20 +1263,24 @@ class ProcessPicThread(multiprocessing.Process):
         return pixout, pixin
 
     def numellip(self, elliplist):
-        posiblenum = range(len(elliplist) + 10)
+        ellipnumbers=set()
+        checknumbers=set(range(len(elliplist)+1))
         for listpos, item in enumerate(elliplist):
             ellippar = config.EllipPar()
             ellippar = elliplist[listpos]
-            posiblenum.remove(ellippar.Num)
-        return posiblenum[0]
+            ellipnumbers.add(ellippar.Num)
+        checknumbers.difference_update(ellipnumbers)
+        return checknumbers.pop()
 
     def numconnect(self, liste):
-        posiblenum = range(len(liste) + 10)
+        connectnumbers=set()
+        checknumbers=set(range(len(liste)+1))
         for listpos, item in enumerate(liste):
             linepar = config.LinePar()
             linepar = liste[listpos]
-            posiblenum.remove(linepar.Num)
-        return posiblenum[0]
+            connectnumbers.add(linepar.Num)
+        checknumbers.difference_update(connectnumbers)
+        return checknumbers.pop()
 
     def checksubrect(self, image, rect):
         # print rect[2],rect[3],image.shape[0],image.shape[1]
