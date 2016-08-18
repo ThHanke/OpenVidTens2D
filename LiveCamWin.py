@@ -3,11 +3,11 @@ import threading
 import Queue
 import VideoCapture
 from time import clock
-from time import sleep
+#from time import sleep
 
 import wx
 import cv2
-import numpy
+import numpy as np
 
 
 # import globals
@@ -42,7 +42,7 @@ class LiveCamWin(wx.Frame):
         self.fileismovie = False
         self.datatoqueue = list()
 
-        self.aquirequeue = Queue.Queue(1)
+        self.aquirequeue = Queue.Queue(3)
         self.totrackqueue = totrackqueue
         self.pipetotrack = pipetotrack
         self.bmppaintqueue = Queue.LifoQueue(1)
@@ -146,25 +146,29 @@ class LiveCamWin(wx.Frame):
             if isinstance(item, VidCapQueuePicThread):
                 # print 'found one! kill it!'
                 self.aquirequeue.put((self, None, True))
-                sleep(0.1)
+                wx.Usleep(100)
+                #sleep(0.1)
                 self.aquirequeue.queue.clear()
                 # print self.aquirequeue.queue
             if isinstance(item, CVCapQueuePicThread):
                 # print 'found one! kill it!'
                 self.aquirequeue.put((self, None, True))
-                sleep(0.1)
+                wx.Usleep(100)
+                #sleep(0.1)
                 self.aquirequeue.queue.clear()
                 # print self.aquirequeue.queue
             if isinstance(item, QueuePicThread):
                 # print 'found one! kill it!'
                 self.aquirequeue.put((None, None, True))
-                sleep(0.1)
+                wx.Usleep(100)
+                #sleep(0.1)
                 self.aquirequeue.queue.clear()
                 # print self.aquirequeue.queue
             if isinstance(item, WinCamBmpPaintThread):
                 # print 'found one! kill it!'
                 self.bmppaintqueue.put(None)
-                sleep(0.1)
+                wx.Usleep(100)
+                #sleep(0.1)
                 self.aquirequeue.queue.clear()
 
         if self.isfileinterface:
@@ -182,7 +186,7 @@ class LiveCamWin(wx.Frame):
 
     def initvidcapcamera(self, num=-1):
         # DirectShowDevice
-        return False
+        #return False
 
         if isinstance(self.caminterface, VideoCapture.Device):
             print 'cam active'
@@ -217,7 +221,7 @@ class LiveCamWin(wx.Frame):
                 return False
 
         # self.ScaledImg=cv.CreateImage((100,100),8,3)
-        self.ScaledImg = numpy.zeros((100, 100, 3), dtype=numpy.uint8)
+        self.ScaledImg = np.zeros((100, 100, 3), dtype=np.uint8)
 
         self.panel = wx.Panel(self, wx.ID_ANY, style=wx.BORDER_SUNKEN)
         self.panelsizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -263,7 +267,7 @@ class LiveCamWin(wx.Frame):
 
         print width, height
 
-        self.ScaledImg = numpy.zeros((100, 100, 3), dtype=numpy.uint8)
+        self.ScaledImg = np.zeros((100, 100, 3), dtype=np.uint8)
 
         self.panel = wx.Panel(self, wx.ID_ANY, style=wx.BORDER_SUNKEN)
         self.panelsizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -299,7 +303,7 @@ class LiveCamWin(wx.Frame):
 
         self.dirname = config.ProgDir
         # self.ScaledImg=cv.CreateImage((100,100),8,3)
-        self.ScaledImg = numpy.zeros((100, 100, 3), dtype=numpy.uint8)
+        self.ScaledImg = np.zeros((100, 100, 3), dtype=np.uint8)
 
         self.Bind(wx.EVT_SCROLL_CHANGED, self.onslider)
 
@@ -381,7 +385,7 @@ class LiveCamWin(wx.Frame):
         return True
 
     def loadmovie(self, event):
-        filters = 'Video file (*.avi)|*.avi'
+        filters = 'Video file (*.avi; *.mkv)|*.avi; *.mkv'
         dlg = wx.FileDialog(self, "Select files", self.dirname, "", filters, wx.FD_MULTIPLE)
         if dlg.ShowModal() == wx.ID_OK:
             try:
@@ -398,6 +402,8 @@ class LiveCamWin(wx.Frame):
         self.SetStatusText(moviepath)
         self.filecapture = cv2.VideoCapture(moviepath)
         piccount = int(self.filecapture.get(cv2.CAP_PROP_FRAME_COUNT))
+        print self.filecapture.get(cv2.CAP_PROP_FORMAT)
+        print self.filecapture.get(cv2.CAP_PROP_FOURCC)
         # next print must be called except image while be tiled
 
         print str(self.filecapture.get(cv2.CAP_PROP_FRAME_WIDTH)) + 'x' + str(
@@ -422,8 +428,10 @@ class LiveCamWin(wx.Frame):
         if self.fileismovie:
             self.filecapture.set(cv2.CAP_PROP_POS_FRAMES, picnum - 1)
             err, temp = self.filecapture.read()
-            # print err
-            self.image = numpy.copy(temp)
+            #print err
+            #print temp.dtype
+            self.image = np.copy(temp)
+            print self.image.dtype,self.image.shape
             self.acttime = clock()
         else:
             from os.path import abspath, join
@@ -447,7 +455,8 @@ class LiveCamWin(wx.Frame):
     def onclose(self, event):
         if self.caminterface is not None:
             self.aquirequeue.put((self, None, False), False)
-            sleep(0.3)
+            wx.Usleep(300)
+            #sleep(0.3)
         try:
             del self.caminterface
         except:
@@ -476,7 +485,7 @@ class QueuePicThread(threading.Thread):
         # print "Aquirethread started "
         while True:
             # print self.aquirequeue.queue
-            (self.timestamp, image, plsexit) = self.aquirequeue.get()
+            (self.timestamp, image, plsexit) = self.aquirequeue.get(block=True)
             if plsexit:
                 # print 'QueuePicThread exiting'
                 break
@@ -484,8 +493,10 @@ class QueuePicThread(threading.Thread):
 
             if len(image.shape) >= 3:
                 self.gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+                #print 'not gray'
             else:
                 self.gray = image
+                #print 'is gray'
             try:
                 self.bmppaintqueue.put(image, False)
             except Queue.Full:
@@ -529,7 +540,7 @@ class VidCapQueuePicThread(threading.Thread):
 
         while True:
             if not self.aquirequeue.empty():
-                (parent, self.caminterface, self.plsexit) = self.aquirequeue.get()
+                (parent, self.caminterface, self.plsexit) = self.aquirequeue.get(True)
 
             if self.plsexit:
                 # print 'vidcap is exiting'
@@ -549,9 +560,9 @@ class VidCapQueuePicThread(threading.Thread):
                         self.framecount = 1
                         self.lasttime = self.timestamp
 
-                    # create numpy array
-                    temp_np = numpy.fromstring(rawdata[0], numpy.uint8)
-                    np_temp = numpy.reshape(temp_np, (rawdata[2], rawdata[1], 3))
+                    # create np array
+                    temp_np = np.fromstring(rawdata[0], np.uint8)
+                    np_temp = np.reshape(temp_np, (rawdata[2], rawdata[1], 3))
                     temp_np = cv2.flip(np_temp, 0)
                     temp_np = cv2.cvtColor(temp_np, cv2.COLOR_BGR2RGB)
                     self.gray = cv2.cvtColor(temp_np, cv2.COLOR_RGB2GRAY)
@@ -620,9 +631,9 @@ class CVCapQueuePicThread(threading.Thread):
                         self.framecount = 1
                         self.lasttime = self.timestamp
 
-                    # create numpy array
-                    # temp_np=numpy.fromstring(rawdata[0],numpy.uint8)
-                    # np_temp=numpy.reshape(temp_np, (rawdata[2],rawdata[1],3))
+                    # create np array
+                    # temp_np=np.fromstring(rawdata[0],np.uint8)
+                    # np_temp=np.reshape(temp_np, (rawdata[2],rawdata[1],3))
                     # temp_np=cv2.flip(np_temp,0)
                     temp_np = cv2.cvtColor(rawdata, cv2.COLOR_BGR2RGB)
                     self.gray = cv2.cvtColor(temp_np, cv2.COLOR_RGB2GRAY)
@@ -653,7 +664,7 @@ class WinCamBmpPaintThread(threading.Thread):
         self.panel = panel
 
         # self.ScaledImg=cv.CreateImage((100,100),8,3)
-        self.ScaledImg = numpy.zeros((100, 100), dtype=numpy.uint8)
+        self.ScaledImg = np.zeros((100, 100), dtype=np.uint8)
         self.setDaemon(True)
         self.start()
         # start the thread
@@ -662,7 +673,7 @@ class WinCamBmpPaintThread(threading.Thread):
     def run(self):
         while True:
             self.image = self.bmppaintqueue.get()
-            if not isinstance(self.image, numpy.ndarray):
+            if not isinstance(self.image, np.ndarray):
                 break
             self.resizeanddraw(self.panel, self.image)
             self.bmppaintqueue.task_done()
@@ -687,7 +698,8 @@ class WinCamBmpPaintThread(threading.Thread):
             dc.DrawBitmap(bitmap, 0, 0, False)
         else:
             row, col = scaledimg.shape
-            # test=numpy.zeros((row,col), dtype=numpy.uint8)
+            # test=np.zeros((row,col), dtype=np.uint8)
+            # print scaledimg.dtype
             test = cv2.cvtColor(scaledimg, cv2.COLOR_GRAY2RGB)
             bitmap = wx.BitmapFromBuffer(col, row, test)
             dc.DrawBitmap(bitmap, 0, 0, False)

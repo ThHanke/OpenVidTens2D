@@ -45,7 +45,7 @@ setup(data_files=[('', ['calicon.png',
                           }
                },
       zipfile=None,
-      console=['OpenVidTens2D.py'], requires=['bbfreeze', 'cv2', 'numpy', 'py2exe']
+      console=['OpenVidTens2D.py'], requires=['bbfreeze', 'cv2', 'np', 'py2exe']
 
       )
 

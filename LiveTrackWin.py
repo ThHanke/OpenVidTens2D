@@ -8,8 +8,7 @@ from multiprocessing.pool import ThreadPool
 
 import wx
 import cv2
-import numpy
-
+import numpy as np
 import VideoWriter
 
 
@@ -25,6 +24,7 @@ ID_CCALS = wx.NewId()
 ID_PICKALL = wx.NewId()
 ID_SRFACTOR = wx.NewId()
 ID_VSTREAM = wx.NewId()
+ID_RFRAMERATE = wx.NewId()
 
 
 def contour_iterator(contour):
@@ -63,6 +63,7 @@ class LiveTrackWin(wx.Frame):
         self.Bind(wx.EVT_MENU, self.pickall, id=ID_PICKALL)
         self.Bind(wx.EVT_MENU, self.changesrfactor, id=ID_SRFACTOR)
         self.Bind(wx.EVT_MENU, self.enablerecord, id=ID_VSTREAM)
+        self.Bind(wx.EVT_MENU, self.reduceframerate, id=ID_RFRAMERATE)
 
         self.panel.Bind(wx.EVT_MOUSEWHEEL, self.mousewheel)
         self.panel.Bind(wx.EVT_ENTER_WINDOW, self.mouseinwindow)
@@ -71,6 +72,7 @@ class LiveTrackWin(wx.Frame):
         self.panel.Bind(wx.EVT_RIGHT_DOWN, self.mouserightclick)
         self.panel.Bind(wx.EVT_MOTION, self.mousemove)
         self.panel.Bind(wx.EVT_RIGHT_UP, self.mouserightclick)
+
 
         # spawn queue
 
@@ -95,6 +97,7 @@ class LiveTrackWin(wx.Frame):
         self.connectlist = list()
         self.rightdown = False, (None, None), (None, None)
         self.PickAll = False
+        self.framerate = None
 
         self.CalibData = CalibData()
         self.calibrated = False
@@ -109,7 +112,6 @@ class LiveTrackWin(wx.Frame):
         self.viewqueue = multiprocessing.Queue(5)
         self.TestView=wxImageView.Frame(self.viewqueue,self.viewtotrack)
         self.childs.append(self.TestView)
-
         ProcessPicThread(self.childendpipe, self.pipetoplot, self.totrackqueue, self.bmpplotqueue, self.toplotqueue, self.viewqueue)
         # init variables in backgroundprocess
         # self.sendstatustobackgroundprocess()
@@ -130,7 +132,8 @@ class LiveTrackWin(wx.Frame):
         operate.Append(ID_CCAL, '&Calibration', 'Camera Calibration')
         operate.Append(ID_PICKALL, '&Pick All', 'Try to pick all ellipses')
         operate.Append(ID_SRFACTOR, '&SRFactor', 'Change SearchrectFaktor')
-        operate.Append(ID_VSTREAM, '&Record Video', 'Save Live STream when Capturing', kind=wx.ITEM_CHECK)
+        operate.Append(ID_VSTREAM, '&Record Video', 'Save Live Stream when Capturing', kind=wx.ITEM_CHECK)
+        operate.Append(ID_RFRAMERATE, '&Reduce Framerate', 'Reduce acquisition framerate')
 
         return menubar
 
@@ -142,6 +145,16 @@ class LiveTrackWin(wx.Frame):
             self.parentendpipe.send('Enable Record')
         else:
             self.parentendpipe.send('Disable Record')
+
+    def reduceframerate(self,event):
+        framerate=wx.GetTextFromUser("Set framerate to [per second]", default_value='max')
+        try:
+            framerate=float(framerate)
+        except ValueError:
+            framerate='max'
+        self.parentendpipe.send(('framerate', framerate))
+        #print framerate, type(framerate)
+        return
 
     def updateinfo(self, event):
         if self.parentendpipe.poll():
@@ -403,6 +416,7 @@ class ProcessPicThread(multiprocessing.Process):
         self.recordqueue = multiprocessing.Queue()
         self.replot = False
 
+        self.framerate = 'max'
         self.lasttime = 0
         self.framecount = 0
         self.actframecount = 0
@@ -447,6 +461,8 @@ class ProcessPicThread(multiprocessing.Process):
                 if msg[0] == 'replot':
                     self.replot = True
                     # print 'replot'
+                if msg[0] == 'framerate':
+                    self.framerate=msg[1]
                 if msg[0] == 'New mark':
                     self.newellip = msg[1]
                     # try to find a new ellip
@@ -538,23 +554,23 @@ class ProcessPicThread(multiprocessing.Process):
                 # print msg
                 if msg[0] == 'Capturing':
                     fourcc = cv2.VideoWriter_fourcc('D', 'I', 'B', ' ')
+                    #fourcc= -1
                     # fourcc= cv2.VideoWriter_fourcc('X','2','6','4')
                     name = msg[1].split('.', 1)[0]
                     # print name
                     self.videofilename = name
                     # save last frame as overview of markers
-                    overview = numpy.copy(self.image)
+                    overview = np.copy(self.image)
                     self.drawallmarks(overview, self.elliplist, self.connectlist)
                     overview = cv2.cvtColor(overview, cv2.COLOR_BGR2RGB)
                     cv2.imwrite(name + '_Overview' + '.png', overview)
                     if self.recordstream:
                         self.videowriterProcess = VideoWriter.VideoWriterProcess(self.videofilename, fourcc,
                                                                                  self.recordqueue)
-                        # self.videowriter=cv2.VideoWriter(self.videofilename+'.avi',fourcc,30,(self.raw.shape[1],self.raw.shape[0]),isColor=False)
                     self.capturing = True
                 if msg == 'Stopped Capturing':
                     if self.recordstream:
-                        # self.videowriter.release()
+
                         self.recordqueue.put('TERMINATE')
                         self.videofilepart = 1
                     # print 'Stopped'
@@ -566,25 +582,33 @@ class ProcessPicThread(multiprocessing.Process):
                     imagetuple = self.queue.get(False)
                     # print type(imagetuple[1])
                     self.timestamp = imagetuple[0]
-                    if isinstance(self.raw, numpy.ndarray):
-                        self.oldimage = numpy.copy(self.raw)
+                    if isinstance(self.raw, np.ndarray):
+                        self.oldimage = np.copy(self.raw)
                     else:
-                        self.oldimage = numpy.copy(imagetuple[1])
-                    self.raw = numpy.copy(imagetuple[1])
+                        self.oldimage = np.copy(imagetuple[1])
+                    self.raw = np.copy(imagetuple[1])
                 except Queue.Empty:
                     # print 'no pic: i continue'
                     continue
 
-            temp = numpy.copy(self.raw)
+            temp = np.copy(self.raw)
 
             self.acttime = clock()
-            if self.acttime - self.lasttime < 1:
-                self.framecount += 1
+            if self.framerate=='max':
+                if self.acttime - self.lasttime < 1:
+                    self.framecount += 1
+                else:
+                    # full second
+                    self.actframecount = self.framecount
+                    self.framecount = 1
+                    self.lasttime = self.acttime
             else:
-                # full second
-                self.actframecount = self.framecount
-                self.framecount = 1
-                self.lasttime = self.acttime
+                if self.acttime - self.lasttime < 1/self.framerate:
+                    continue
+                else:
+                    self.actframecount =self.framerate
+                    self.lasttime = self.acttime
+
 
             if self.calibrated:
                 # print 'remap'
@@ -594,10 +618,11 @@ class ProcessPicThread(multiprocessing.Process):
                 self.raw = temp
 
             self.image = cv2.cvtColor(self.raw, cv2.COLOR_GRAY2RGB)
+            #self.image=self.raw
 
             if self.calibrate and self.lasttime != self.lastcalibtime:
-                pattern_points = numpy.zeros((numpy.prod(self.chesssize), 3), numpy.float32)
-                pattern_points[:, :2] = numpy.indices(self.chesssize).T.reshape(-1, 2)
+                pattern_points = np.zeros((np.prod(self.chesssize), 3), np.float32)
+                pattern_points[:, :2] = np.indices(self.chesssize).T.reshape(-1, 2)
                 pattern_points *= self.squaresize
 
                 # print len(self.obj_points)
@@ -655,6 +680,11 @@ class ProcessPicThread(multiprocessing.Process):
 
             # track all existing ellips
             # print self.elliplist
+
+            #dont do anything if framerate is set and time between images is short
+
+
+
             if len(self.elliplist) > 0:
                 self.newelliplist, self.newconnectlist, self.image = self.processimage(self.raw, self.elliplist,
                                                                                        self.connectlist)
@@ -667,26 +697,32 @@ class ProcessPicThread(multiprocessing.Process):
 
             if self.recordstream and self.capturing:
 
-                # if self.videowriter.isOpened():
-                # self.videowriter.write(self.raw)
+                #if self.videowriter.isOpened():
+                #self.videowriter.write(self.raw)
                 if isinstance(self.videowriterProcess, VideoWriter.VideoWriterProcess):
-                    self.recordqueue.put(numpy.copy(self.raw))
+                    self.recordqueue.put(np.copy(self.raw))
                     # print 'recording'
                     # print self.videowriter
+                #print self.raw.ndim
+
+                # #print self.videopipe.poll()
+                # #self.videopipe.stdin.write(self.raw.tostring())
+                # self.videopipe.stdin.write(self.image.tostring())
+                # # self.videopipe.communicate (self.raw.tostring())
 
             # show in frame - put it to paintqueue
             try:
                 self.bmpqueue.put(
                     (self.timestamp, self.image, self.newelliplist, self.newconnectlist, self.actframecount), False)
             except Queue.Full:
-                # print 'toplotqueue1 full'
+                #print 'toplotqueue1 full'
                 pass
 
             # show in winplot - put it to winplotqueue
             try:
                 self.out_queue2.put((self.timestamp, self.image, self.newelliplist, self.newconnectlist), False)
             except Queue.Full:
-                # print 'toplotqueue3 full'
+                #print 'toplotqueue2 full'
                 pass
 
             self.replot = False
@@ -695,12 +731,12 @@ class ProcessPicThread(multiprocessing.Process):
 
     def drawoptflow(self, img, flow, step=16):
         h, w = img.shape[:2]
-        y, x = numpy.mgrid[step / 2:h:step, step / 2:w:step].reshape(2, -1)
+        y, x = np.mgrid[step / 2:h:step, step / 2:w:step].reshape(2, -1)
         fx, fy = flow[y, x].T
-        lines = numpy.vstack([x, y, x + fx, y + fy]).T.reshape(-1, 2, 2)
-        lines = numpy.int32(lines + 0.5)
+        lines = np.vstack([x, y, x + fx, y + fy]).T.reshape(-1, 2, 2)
+        lines = np.int32(lines + 0.5)
         # vis = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-        vis = numpy.copy(img)
+        vis = np.copy(img)
         cv2.polylines(vis, lines, 0, (255, 255, 255))
         # for (x1, y1), (x2, y2) in lines:
         # cv2.circle(vis, (x1, y1), 1,(0, 255, 0), -1)
@@ -737,18 +773,18 @@ class ProcessPicThread(multiprocessing.Process):
                 break
             # print 'get search contour image'
             rectimage, searchrect = self.getsearchcounturimage(image, searchrectr)
-            if not isinstance(rectimage, numpy.ndarray):
+            if not isinstance(rectimage, np.ndarray):
                 continue
 
             # print 'search image created'
-            if not isinstance(self.image, numpy.ndarray):
+            if not isinstance(self.image, np.ndarray):
                 continue
             # pixout,pixin=self.inoutval(rectimage)
             if cv2.countNonZero(rectimage) <= 10:
                 continue
 
             img2, contours, hier = cv2.findContours(rectimage, cv2.RETR_LIST, cv2.CHAIN_APPROX_TC89_KCOS)
-            print 'find contours'
+            #print 'find contours'
 
 
             for contour in contours:
@@ -893,7 +929,7 @@ class ProcessPicThread(multiprocessing.Process):
         ##                pass
         ##
         for task in tasklist:
-            task.wait()  # wait till task is completed and result available
+            #task.wait()  # wait till task is completed and result available
             # print task.get()
             ellipnew = task.get()
             if ellipnew is not None:
@@ -913,8 +949,9 @@ class ProcessPicThread(multiprocessing.Process):
 
         for pos, rect in enumerate(rectlist):
             # print pos
-            rectimage, searchrect = self.getsearchcounturimage(image, rect)
-            if not isinstance(rectimage, numpy.ndarray):
+            scale=3
+            rectimage, searchrect = self.getsearchcounturimage(image, rect,scale)
+            if not isinstance(rectimage, np.ndarray):
                 continue
 
             # if cv2.countNonZero(rectimage)<=10:
@@ -922,7 +959,7 @@ class ProcessPicThread(multiprocessing.Process):
 
             im2, contours, hier =cv2.findContours(rectimage.copy(), cv2.RETR_LIST,cv2.CHAIN_APPROX_TC89_KCOS)
             #im2, contours, hier = cv2.findContours(rectimage.copy(), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_TC89_KCOS)
-            contimage = numpy.zeros_like(rectimage)
+            contimage = np.zeros_like(rectimage)
             #print contimage.dtype
             cv2.drawContours(contimage, contours, -1, (255, 255, 255))
             # hier[3] is here always -1 for white spots on black ground and 0 for black spots on white ground
@@ -947,17 +984,17 @@ class ProcessPicThread(multiprocessing.Process):
                 cv2.rectangle(contimage, (conrect[0], conrect[1]), (conrect[0] + conrect[2], conrect[1] + conrect[3]),
                               (125, 255, 125))
                 # print self.checksubrect(contimage,conrect)
-                print i
+                #print i
                 arcscale=cv2.arcLength(contour,True)/(2*(conrect[2]+conrect[3]))
                 if arcscale>=0.9 or arcscale<0.3:
-                    print 'skipped'
+                    # print 'skipped'
                     continue
 
 
                 # Fits ellipse to current contour.
                 ellipparnew = self.fitelliponcontour(contour)
 
-
+                #show filtered image in viewer
                 #self.viewqueue.put((0,contimage),False)
 
                 if conrect[0] < 0 or conrect[1] < 0 or conrect[0] + conrect[2] >= contimage.shape[1] or \
@@ -1209,58 +1246,82 @@ class ProcessPicThread(multiprocessing.Process):
             x = a
             y = b
         else:
-            t = math.atan(-b * math.tan(angle) / a)
-            x = abs(a * math.cos(t) * math.cos(angle) - b * math.sin(t) * math.sin(angle))
-            t = math.atan(a * (1 / math.tan(angle)) / b)
-            y = abs(b * math.sin(t) * math.cos(angle) + a * math.cos(t) * math.sin(angle))
+            if math.tan(angle)==0.0:
+                t=0
+                x=abs(a * math.cos(t) * math.cos(angle) - b * math.sin(t) * math.sin(angle))
+                t=math.atan(a * (1 / 1E-9) / b)
+                y = abs(b * math.sin(t) * math.cos(angle) + a * math.cos(t) * math.sin(angle))
+            else:
+                t = math.atan(-b * math.tan(angle) / a)
+                x = abs(a * math.cos(t) * math.cos(angle) - b * math.sin(t) * math.sin(angle))
+                t = math.atan(a * (1 / math.tan(angle)) / b)
+                y = abs(b * math.sin(t) * math.cos(angle) + a * math.cos(t) * math.sin(angle))
         # print ellip.Size[0],ellip.Size[1],y,x, angle
 
         return y, x
 
-    def getsearchcounturimage(self, image, rect):
+    def getsearchcounturimage(self, image, rect,scale=1):
         # check subrect is in image
         if not self.checksubrect(image, rect):
             return None, rect
         else:
             # print 'copy subimage'
-
             temp = image[rect[1]:(rect[1] + rect[3]), rect[0]:(rect[0] + rect[2])]
             # print 'image mid pos'
             # print  rect[1]+rect[3]/2,rect[0]+rect[2]/2
+
             pyrimage = cv2.pyrUp(temp)
             temp = cv2.pyrDown(pyrimage)
-            temp = cv2.medianBlur(temp, 3)
-            thresimg = cv2.resize(temp, (temp.shape[1] * 5, temp.shape[0] * 5), interpolation=cv2.INTER_CUBIC)
 
-            # ret,thresimg=cv2.threshold(thresimg,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
-            pixin, pixout = self.inoutval(thresimg)
-            if abs(pixin - pixout) < 10:
-                # print 'grayscale gradient <10'
-                return None, None
-            ret, thresimg = cv2.threshold(thresimg, int((pixin + pixout) / 2), 255, cv2.THRESH_BINARY)
+
+            thresimg = cv2.resize(temp, (temp.shape[1] * scale, temp.shape[0] * scale), interpolation=cv2.INTER_CUBIC)
+            # get threshold value
+            #Methode 1
+            # pixin, pixout = self.inoutval(temp)
+            # if abs(pixin - pixout) < 10:
+            #    # print 'grayscale gradient <10'
+            #    return None, None
+            # ret, thresimg = cv2.threshold(thresimg, int((pixin + pixout) / 2), 255, cv2.THRESH_BINARY)
+
+            #Methode 2
+            ret,thresimg=cv2.threshold(thresimg,0,255,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+
+
             # print 'return subimage'
             return thresimg, rect
 
     def inoutval(self, img):
+        height,width=img.shape[0],img.shape[1]
+        y,x = np.ogrid[-int(height/3)-1:height-int(height/3)-1,-int(width/3)-1:width-int(width/3)-1,]
+        img_mask = ellipse(0,0,int(width/3),int(height/3),0,x,y)
+        #outer value
+        img_masked=np.ma.array(img, mask=img_mask)
+        thres_in=img_masked.mean()
+        img_masked=np.ma.array(img, mask=np.logical_not(img_mask))
+        thres_out=img_masked.mean()
+        #print thres_out,thres_in
 
-        # pixout=0
-        # pixin=0
-        width = img.shape[1]
-        height = img.shape[0]
+        return thres_out, thres_in
 
-        pixout = img[0:2, width - 2:width].mean() + img[height - 2:height, width - 2:width].mean() \
-                 + img[0:height, 0:2].mean() + img[0:height, width - 2:width].mean()
-        pixout = int(pixout / 4)
-        # print 'some values'
-        # print img[0,0],img[0,1],img[1,0],img[0,width-1],img[1,width-1],img[0,width-2]
 
-        pixin = int(img[int(height / 2) - 5:int(height / 2) + 5, int(width / 2) - 5:int(width / 2) + 5].mean())
-        # print 'some values'
-        # print img[int(height/2),int(width/2)],img[int(height/2)+1,int(width/2)],img[int(height/2),int(width/2)+1],img[int(height/2)+1,int(width/2)+1]
 
-        # print'pixout/in'
-        # print pixout,pixin
-        return pixout, pixin
+        # width = img.shape[1]
+        # height = img.shape[0]
+        #
+        # pixout = img[0:2, width - 2:width].mean() + img[height - 2:height, width - 2:width].mean() \
+        #          + img[0:height, 0:2].mean() + img[0:height, width - 2:width].mean()
+        # pixout = int(pixout / 4)
+        # # print 'some values'
+        # # print img[0,0],img[0,1],img[1,0],img[0,width-1],img[1,width-1],img[0,width-2]
+        #
+        # pixin = int(img[int(height / 2) - int(height / 5):int(height / 2) + int(height / 5), int(width / 2) - int(width / 5):int(width / 2) + int(width / 5)].mean())
+        # #pixin = int(img[int(height / 2) - 5:int(height / 2) + 5, int(width / 2) - 5:int(width / 2) + 5].mean())
+        # # print 'some values'
+        # # print img[int(height/2),int(width/2)],img[int(height/2)+1,int(width/2)],img[int(height/2),int(width/2)+1],img[int(height/2)+1,int(width/2)+1]
+        #
+        # # print'pixout/in
+        # # print pixout,pixin
+        # return pixout, pixin
 
     def numellip(self, elliplist):
         ellipnumbers=set()
@@ -1339,7 +1400,7 @@ class WinTrackBmpPaintThread(threading.Thread):
         self.panel.Bind(wx.EVT_PAINT, self.onpaint)
         self.num = num
         self.zoomrect = None
-        self.Overlay = numpy.zeros((100, 100, 3))
+        self.Overlay = np.zeros((100, 100, 3))
 
         self.timestamp = None
 
@@ -1366,7 +1427,7 @@ class WinTrackBmpPaintThread(threading.Thread):
 
             rightdown = self.parent.rightdown
 
-            self.Overlay = numpy.copy(image)
+            self.Overlay = np.copy(image)
 
             self.drawallmarks(self.Overlay, ellipses, connections)
 
@@ -1401,7 +1462,7 @@ class WinTrackBmpPaintThread(threading.Thread):
         else:
             scaledimg = cv2.resize(img, (panelwidth, panelheight))
 
-        row, col, x = scaledimg.shape
+        row, col= scaledimg.shape[0],scaledimg.shape[1]
         bitmap = wx.BitmapFromBuffer(col, row, scaledimg)
         dc.DrawBitmap(bitmap, 0, 0, False)
 
@@ -1514,3 +1575,7 @@ class CalibData:
         self.distortion = None
         self.distanceunit = None
 
+def ellipse(h, k, a, b, phi, x, y):
+    xp = (x-h)*math.cos(phi) + (y-k)*math.sin(phi)
+    yp = -(x-h)*math.sin(phi) + (y-k)*math.cos(phi)
+    return (xp/a)**2 + (yp/b)**2 <= 1
