@@ -107,12 +107,16 @@ class LiveTrackWin(wx.Frame):
         self.childs = list()
 
         #add an otional viewer for dev pupose
-        import wxImageView
-        self.tracktoview, self.viewtotrack = multiprocessing.Pipe()
-        self.viewqueue = multiprocessing.Queue(5)
-        self.TestView=wxImageView.Frame(self.viewqueue,self.viewtotrack)
-        self.childs.append(self.TestView)
-        ProcessPicThread(self.childendpipe, self.pipetoplot, self.totrackqueue, self.bmpplotqueue, self.toplotqueue, self.viewqueue)
+        # import wxImageView
+        # self.tracktoview, self.viewtotrack = multiprocessing.Pipe()
+        # self.viewqueue = multiprocessing.Queue(5)
+        # self.TestView=wxImageView.Frame(self.viewqueue,self.viewtotrack)
+        # self.childs.append(self.TestView)
+        # ProcessPicThread(self.childendpipe, self.pipetoplot, self.totrackqueue, self.bmpplotqueue, self.toplotqueue, self.viewqueue)
+
+        #without viever
+        ProcessPicThread(self.childendpipe, self.pipetoplot, self.totrackqueue, self.bmpplotqueue, self.toplotqueue,
+                         None)
         # init variables in backgroundprocess
         # self.sendstatustobackgroundprocess()
 
@@ -446,8 +450,9 @@ class ProcessPicThread(multiprocessing.Process):
         # start the thread
 
     def run(self):
-        print 'created pool of ' + str(self.threadn) + ' workers!'
-        self.threadpool = ThreadPool(processes=self.threadn)
+        self.threadpool=ThreadPool(self.threadn)
+        #self.threadpool = ThreadPool(1)
+        #print 'created pool of ' + str(self.threadn) + ' workers!'
         while True:
             self.newelliplist = list()
             self.newconnectlist = list()
@@ -546,6 +551,8 @@ class ProcessPicThread(multiprocessing.Process):
                 if msg == 'Disable Record':
                     self.recordstream = False
                 if msg == 'Exit':
+                    self.threadpool.close()
+                    self.threadpool.join()
                     # print 'killing process'
                     break
 
@@ -580,7 +587,7 @@ class ProcessPicThread(multiprocessing.Process):
             if not self.replot:
                 try:
                     imagetuple = self.queue.get(False)
-                    # print type(imagetuple[1])
+                    #print type(imagetuple[1])
                     self.timestamp = imagetuple[0]
                     if isinstance(self.raw, np.ndarray):
                         self.oldimage = np.copy(self.raw)
@@ -588,7 +595,7 @@ class ProcessPicThread(multiprocessing.Process):
                         self.oldimage = np.copy(imagetuple[1])
                     self.raw = np.copy(imagetuple[1])
                 except Queue.Empty:
-                    # print 'no pic: i continue'
+                    #print 'no pic: i continue'
                     continue
 
             temp = np.copy(self.raw)
@@ -727,6 +734,7 @@ class ProcessPicThread(multiprocessing.Process):
 
             self.replot = False
             # Frame is done let WinTrack know
+            #comment out massiv framedrop and not necessary pipe is flooded with spam
             self.pipeend.send('Frame processed!')
 
     def drawoptflow(self, img, flow, step=16):
@@ -853,8 +861,6 @@ class ProcessPicThread(multiprocessing.Process):
                     self.elliplist.append(ellip)
 
     def trackellip(self, image, ellipses):
-
-
         elliplistnew = list()
         # print len(ellipses)
         tasklist = list()
@@ -946,16 +952,18 @@ class ProcessPicThread(multiprocessing.Process):
         return elliplistnew, image
 
     def findellip(self, rectlist, ellip, image):
-
+        #print "try to find ellip"
         for pos, rect in enumerate(rectlist):
-            # print pos
-            scale=3
+            #print pos
+            scale=5
             rectimage, searchrect = self.getsearchcounturimage(image, rect,scale)
             if not isinstance(rectimage, np.ndarray):
+                print 'no image returned from getsearchcounturimage'
                 continue
 
             # if cv2.countNonZero(rectimage)<=10:
             # continue
+            #self.viewqueue.put((0, rectimage), False)
 
             im2, contours, hier =cv2.findContours(rectimage.copy(), cv2.RETR_LIST,cv2.CHAIN_APPROX_TC89_KCOS)
             #im2, contours, hier = cv2.findContours(rectimage.copy(), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_TC89_KCOS)
@@ -968,14 +976,14 @@ class ProcessPicThread(multiprocessing.Process):
             for contour in contours:
                 i+=1
                 if len(contour) <= 5:
-                    # print 'too few countour points'
+                    print 'too few countour points'
                     continue
 
                 if cv2.contourArea(contour) <= (rectimage.shape[1] * rectimage.shape[0] / 50):
-                    # print 'contour area to small'
+                    print 'contour area to small'
                     continue
                 if cv2.contourArea(contour) > (rectimage.shape[1] * rectimage.shape[0]):
-                    # print 'contour area to big'
+                    print 'contour area to big'
                     continue
 
                 # find bounding box of contour
@@ -987,7 +995,7 @@ class ProcessPicThread(multiprocessing.Process):
                 #print i
                 arcscale=cv2.arcLength(contour,True)/(2*(conrect[2]+conrect[3]))
                 if arcscale>=0.9 or arcscale<0.3:
-                    # print 'skipped'
+                    print 'skipped'
                     continue
 
 
@@ -1000,7 +1008,7 @@ class ProcessPicThread(multiprocessing.Process):
                 if conrect[0] < 0 or conrect[1] < 0 or conrect[0] + conrect[2] >= contimage.shape[1] or \
                     conrect[1] + conrect[3] >= contimage.shape[0] or conrect[2] < (
                         contimage.shape[1] / 3) or conrect[3] < (contimage.shape[0] / 3):
-                    # print 'fitted shape in contact with border or excedes'
+                    print 'fitted shape in contact with border or excedes'
                     continue
                 else:
                     # define Number
@@ -1014,7 +1022,7 @@ class ProcessPicThread(multiprocessing.Process):
                     # EllipParnew.Angle=-EllipParnew.Angle
                     ellipparnew.mov = ellipparnew.MidPos[0] - ellip.MidPos[0], ellipparnew.MidPos[1] - ellip.MidPos[1]
 
-                    # print 'found'
+                    #print 'found'
                     ellipparnew.searchrect = searchrect
                     #print cv2.isContourConvex(contour)
                     return ellipparnew
@@ -1263,6 +1271,7 @@ class ProcessPicThread(multiprocessing.Process):
     def getsearchcounturimage(self, image, rect,scale=1):
         # check subrect is in image
         if not self.checksubrect(image, rect):
+            print 'checksubrect failed'
             return None, rect
         else:
             # print 'copy subimage'
@@ -1344,9 +1353,9 @@ class ProcessPicThread(multiprocessing.Process):
         return checknumbers.pop()
 
     def checksubrect(self, image, rect):
-        # print rect[2],rect[3],image.shape[0],image.shape[1]
+        #print rect[2],rect[3],image.shape[0],image.shape[1]
         if (rect[0] + rect[2]) <= image.shape[1] and (rect[1] + rect[3]) <= image.shape[0] and rect[0] >= 0 and rect[
-                1] >= 0 and rect[2] >= 20 and rect[3] >= 20:
+                1] >= 0 and rect[2] >= 15 and rect[3] >= 15:
             return True
         else:
             return False

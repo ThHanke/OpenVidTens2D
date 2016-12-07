@@ -3,7 +3,7 @@ import threading
 import Queue
 import VideoCapture
 from time import clock
-#from time import sleep
+from time import sleep
 
 import wx
 import cv2
@@ -42,7 +42,7 @@ class LiveCamWin(wx.Frame):
         self.fileismovie = False
         self.datatoqueue = list()
 
-        self.aquirequeue = Queue.Queue(3)
+        self.aquirequeue = Queue.Queue(5)
         self.totrackqueue = totrackqueue
         self.pipetotrack = pipetotrack
         self.bmppaintqueue = Queue.LifoQueue(1)
@@ -431,7 +431,7 @@ class LiveCamWin(wx.Frame):
             #print err
             #print temp.dtype
             self.image = np.copy(temp)
-            print self.image.dtype,self.image.shape
+            #print self.image.dtype,self.image.shape
             self.acttime = clock()
         else:
             from os.path import abspath, join
@@ -541,6 +541,7 @@ class VidCapQueuePicThread(threading.Thread):
         while True:
             if not self.aquirequeue.empty():
                 (parent, self.caminterface, self.plsexit) = self.aquirequeue.get(True)
+                self.aquirequeue.task_done()
 
             if self.plsexit:
                 # print 'vidcap is exiting'
@@ -573,7 +574,7 @@ class VidCapQueuePicThread(threading.Thread):
                         # print self.timestamp
                     except Queue.Full:
                         pass
-                        # print 'totrackqueue is full'
+                        print 'totrackqueue is full'
 
                     try:
                         # self.bmppaintqueue.put((temp),False)
@@ -581,6 +582,9 @@ class VidCapQueuePicThread(threading.Thread):
                     except Queue.Full:
                         pass
                         # print 'winCam bmppaintqueue3 is full'
+                else:
+                    sleep(0.005)
+
 
 
 class CVCapQueuePicThread(threading.Thread):

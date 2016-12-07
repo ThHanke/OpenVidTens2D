@@ -42,7 +42,7 @@ class InitFrame(wx.Frame):
         # try to init camera
         self.status.SetStatusText('Init Camera Interface')
         # define pic to trac queue
-        self.totrackqueue = multiprocessing.Queue(1)
+        self.totrackqueue = multiprocessing.Queue(10)
         # creat pipe to interact
         self.camtotrack, self.tracktocam = multiprocessing.Pipe()
         parent.LiveCamWin = LiveCamWin.LiveCamWin(self.totrackqueue, self.camtotrack)
@@ -55,7 +55,7 @@ class InitFrame(wx.Frame):
                                                         self.tracktoplot)
         parent.LiveCamWin.childs.append(parent.LiveTrackWin)
         self.status.progressbar.SetValue(66)
-        # init dataplotting module
+        #init dataplotting module
         self.status.SetStatusText('Init Data Aquisition Module ')
         parent.LivePlotWin = LivePlotWin.LivePlotWin(self.trackresultqueue, self.plottotrack)
         parent.LiveTrackWin.childs.append(parent.LivePlotWin)

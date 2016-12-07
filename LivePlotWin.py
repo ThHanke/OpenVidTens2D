@@ -7,7 +7,15 @@ import multiprocessing
 try:
     import u12
 except:
-    print 'LabJack UW driver not found'
+    print 'LabJack U12 driver not found'
+    LABJACKDRIVER = False
+else:
+    LABJACKDRIVER = True
+
+try:
+    import u3
+except:
+    print 'LabJack U3 driver not found'
     LABJACKDRIVER = False
 else:
     LABJACKDRIVER = True
@@ -50,6 +58,7 @@ class LivePlotWin(wx.Frame):
         self.usbmodulbox = wx.Choice(self.buttonpanel, wx.ID_ANY, choices=('None',))
         if LABJACKDRIVER:
             self.usbmodulbox.Append('LabJack U12')
+            self.usbmodulbox.Append('LabJack U3')
 
         self.usbmodulbox.SetSelection(0)
         self.USBModul = self.usbmodulbox.GetString(0)
@@ -213,7 +222,7 @@ class LivePlotWin(wx.Frame):
                 if item.IsOk():
                     parent = self.tree.GetItemParent(item)
                     if parent.IsOk():
-                        if self.tree.GetItemText(parent) in ('Ellipse', 'Connection', 'IO-Modul'):
+                        if self.tree.GetItemText(parent) in ('Ellipse', 'Connection', 'LabJack U12', 'LabJack U3'):
                             self.data = list()
                             this = self.tree.GetItemText(parent), self.tree.GetItemText(item), self.tree.GetItemText(
                                 subitem)
@@ -228,8 +237,12 @@ class LivePlotWin(wx.Frame):
         # add measure modul signals
         if self.USBModul == 'LabJack U12':
             self.itemlist.insert(0, 'LabJack U12')
+        if self.USBModul == 'LabJack U3':
+            self.itemlist.insert(0, 'LabJack U3')
         if self.USBModul == 'None' and ('LabJack U12' in self.itemlist):
             self.itemlist.remove('LabJack U12')
+        if self.USBModul == 'None' and ('LabJack U3' in self.itemlist):
+            self.itemlist.remove('LabJack U3')
         self.tree.DeleteAllItems()
         element = self.tree.AddRoot('Element')
         if len(self.itemlist) > 0:
@@ -259,10 +272,15 @@ class LivePlotWin(wx.Frame):
 
                     c3 = self.tree.AppendItem(this, 'Lenght')
                 if item == 'LabJack U12':
-                    modul = self.tree.AppendItem(element, 'IO-Modul')
+                    modul = self.tree.AppendItem(element, 'LabJack U12')
                     this = self.tree.AppendItem(modul, 'Analog')
                     c1 = self.tree.AppendItem(this, 'Diff1')
                     c2 = self.tree.AppendItem(this, 'Diff2')
+                if item == 'LabJack U3':
+                        modul = self.tree.AppendItem(element, 'LabJack U3')
+                        this = self.tree.AppendItem(modul, 'Analog')
+                        c1 = self.tree.AppendItem(this, 'Diff1')
+                        c2 = self.tree.AppendItem(this, 'Diff2')
 
                     # print len(self.itemlist),len(elliplist),len(connectlist)
         self.recalltreeselection()
@@ -372,8 +390,12 @@ class DataProtoProcess(multiprocessing.Process):
                                 (unicode('Connection'), unicode(str(par.Num)), unicode('Lenght')))
 
                         if item == 'LabJack U12':
-                            self.availabledatalist.append((unicode('IO-Modul'), unicode('Analog'), unicode('Diff1')))
-                            self.availabledatalist.append((unicode('IO-Modul'), unicode('Analog'), unicode('Diff2')))
+                            self.availabledatalist.append((unicode('LabJack U12'), unicode('Analog'), unicode('Diff1')))
+                            self.availabledatalist.append((unicode('LabJack U12'), unicode('Analog'), unicode('Diff2')))
+                        if item == 'LabJack U3':
+                            self.availabledatalist.append((unicode('LabJack U3'), unicode('Analog'), unicode('Diff1')))
+                            self.availabledatalist.append((unicode('LabJack U3'), unicode('Analog'), unicode('Diff2')))
+
 
                 if self.tofile:
                     if not os.path.isfile(self.filename):
@@ -393,6 +415,9 @@ class DataProtoProcess(multiprocessing.Process):
             if USBModul == 'LabJack U12':
                 # print 'get first device'
                 self.USBdevice = u12.U12()
+            if USBModul == 'LabJack U3':
+                # print 'get first device'
+                self.USBdevice = u3.U3()
             if USBModul is 'None' and self.USBdevice is not None:
                 self.USBdevice = None
             if plsexit:
@@ -473,7 +498,7 @@ class DataProtoProcess(multiprocessing.Process):
                             this = epar.Angle
                         temp.append((time, this))
 
-                if item[0] == 'IO-Modul':
+                if item[0] == 'LabJack U12':
 
                     if item[2] == 'Diff1':
                         result = self.USBdevice.eAnalogIn(8)
@@ -481,6 +506,15 @@ class DataProtoProcess(multiprocessing.Process):
                     if item[2] == 'Diff2':
                         result = self.USBdevice.eAnalogIn(9)
                         this = result['voltage']
+                    temp.append((time, this))
+                if item[0] == 'LabJack U3':
+
+                    if item[2] == 'Diff1':
+                        result = self.USBdevice.getAIN(0)
+                        this = result
+                    if item[2] == 'Diff2':
+                        result = self.USBdevice.getAIN(1)
+                        this = result
                     temp.append((time, this))
 
                 if self.tofile:
