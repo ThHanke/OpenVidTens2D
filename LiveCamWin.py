@@ -3,7 +3,7 @@ import threading
 import Queue
 import VideoCapture
 from time import clock
-from time import sleep
+#from time import sleep
 
 import wx
 import cv2
@@ -583,7 +583,9 @@ class VidCapQueuePicThread(threading.Thread):
                         pass
                         # print 'winCam bmppaintqueue3 is full'
                 else:
-                    sleep(0.005)
+                    pass
+                    #wx.Usleep(30)
+
 
 
 

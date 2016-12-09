@@ -735,7 +735,7 @@ class ProcessPicThread(multiprocessing.Process):
             self.replot = False
             # Frame is done let WinTrack know
             #comment out massiv framedrop and not necessary pipe is flooded with spam
-            self.pipeend.send('Frame processed!')
+            #self.pipeend.send('Frame processed!')
 
     def drawoptflow(self, img, flow, step=16):
         h, w = img.shape[:2]
@@ -864,8 +864,11 @@ class ProcessPicThread(multiprocessing.Process):
         elliplistnew = list()
         # print len(ellipses)
         tasklist = list()
+        # print 'start tracking'
+        # start = clock()
         for listpos, item in enumerate(ellipses):
             # print 'track ellip'
+
             triedtorescue = False
             ellip = config.EllipPar()
 
@@ -894,13 +897,24 @@ class ProcessPicThread(multiprocessing.Process):
                 # make sure its not bigger then image
                 flowrect = self.getpropersubrect(image, flowrect, True)
                 # scale down to make it faster
-                oldimg = cv2.resize(
-                    self.oldimage[flowrect[1]:flowrect[1] + flowrect[3], flowrect[0]:flowrect[0] + flowrect[2]], None,
-                    fx=0.25, fy=0.25)
-                newimg = cv2.resize(
-                    self.raw[flowrect[1]:flowrect[1] + flowrect[3], flowrect[0]:flowrect[0] + flowrect[2]], None,
-                    fx=0.25, fy=0.25)
+                # oldimg = cv2.resize(
+                #     self.oldimage[flowrect[1]:flowrect[1] + flowrect[3], flowrect[0]:flowrect[0] + flowrect[2]], None,
+                #     fx=0.25, fy=0.25)
+                # newimg = cv2.resize(
+                #     self.raw[flowrect[1]:flowrect[1] + flowrect[3], flowrect[0]:flowrect[0] + flowrect[2]], None,
+                #     fx=0.25, fy=0.25)
+                # print 'get views for flow'
+                # print (clock() - start) * 1000
+                #only get reduced size
+                scale=flowrect[2]//20
+                oldimg = self.oldimage[flowrect[1]:flowrect[1] + flowrect[3]:scale, flowrect[0]:flowrect[0] + flowrect[2]:scale]
+                newimg = self.raw[flowrect[1]:flowrect[1] + flowrect[3]:scale, flowrect[0]:flowrect[0] + flowrect[2]:scale]
+                print oldimg.shape
+                # print 'got views'
+                # print (clock() - start) * 1000
                 flow = cv2.calcOpticalFlowFarneback(oldimg, newimg, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+                # print 'calculated opt flow'
+                # print (clock() - start) * 1000
 
                 # x,y=int(newimg.shape[1]/2),int(newimg.shape[0]/2)
                 # fx, fy = flow[y,x].T
@@ -921,7 +935,8 @@ class ProcessPicThread(multiprocessing.Process):
             except:
                 firstsearchrect = (int(ellip.MidPos[0] - b / 2), int(ellip.MidPos[1] - h / 2), int(b), int(h))
                 rectlist = self.searchrectlist(firstsearchrect, (0, 0))
-
+            # print 'calculated flows'
+            # print (clock()-start)*1000
             task = self.threadpool.apply_async(self.findellip, (rectlist, ellip, image))
             tasklist.append(task)
         ##            ellipnew=self.findellip(rectlist,ellip,image)
@@ -934,6 +949,8 @@ class ProcessPicThread(multiprocessing.Process):
         ##                #print 'lost mark'
         ##                pass
         ##
+        # print 'tasks set'
+        # print (clock()-start)*1000
         for task in tasklist:
             #task.wait()  # wait till task is completed and result available
             # print task.get()
@@ -949,13 +966,15 @@ class ProcessPicThread(multiprocessing.Process):
                 # cv2.rectangle(image,(rect[0],rect[1]),(int(rect[0]+rect[2]),int(rect[1]+rect[3])),(255,255,255),1)
 
         # print 'copy list'
+        # print 'got all results'
+        # print (clock()-start)*1000
         return elliplistnew, image
 
     def findellip(self, rectlist, ellip, image):
         #print "try to find ellip"
         for pos, rect in enumerate(rectlist):
             #print pos
-            scale=5
+            scale=1
             rectimage, searchrect = self.getsearchcounturimage(image, rect,scale)
             if not isinstance(rectimage, np.ndarray):
                 print 'no image returned from getsearchcounturimage'
@@ -967,9 +986,9 @@ class ProcessPicThread(multiprocessing.Process):
 
             im2, contours, hier =cv2.findContours(rectimage.copy(), cv2.RETR_LIST,cv2.CHAIN_APPROX_TC89_KCOS)
             #im2, contours, hier = cv2.findContours(rectimage.copy(), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_TC89_KCOS)
-            contimage = np.zeros_like(rectimage)
+            #contimage = np.zeros_like(rectimage)
             #print contimage.dtype
-            cv2.drawContours(contimage, contours, -1, (255, 255, 255))
+            #cv2.drawContours(contimage, contours, -1, (255, 255, 255))
             # hier[3] is here always -1 for white spots on black ground and 0 for black spots on white ground
             # print hier
             i=0
@@ -988,10 +1007,10 @@ class ProcessPicThread(multiprocessing.Process):
 
                 # find bounding box of contour
                 conrect = cv2.boundingRect(contour)
-                # print conrect
-                cv2.rectangle(contimage, (conrect[0], conrect[1]), (conrect[0] + conrect[2], conrect[1] + conrect[3]),
-                              (125, 255, 125))
-                # print self.checksubrect(contimage,conrect)
+                # # print conrect
+                # cv2.rectangle(contimage, (conrect[0], conrect[1]), (conrect[0] + conrect[2], conrect[1] + conrect[3]),
+                #               (125, 255, 125))
+                # # print self.checksubrect(contimage,conrect)
                 #print i
                 arcscale=cv2.arcLength(contour,True)/(2*(conrect[2]+conrect[3]))
                 if arcscale>=0.9 or arcscale<0.3:
@@ -1000,14 +1019,15 @@ class ProcessPicThread(multiprocessing.Process):
 
 
                 # Fits ellipse to current contour.
+
                 ellipparnew = self.fitelliponcontour(contour)
 
                 #show filtered image in viewer
                 #self.viewqueue.put((0,contimage),False)
 
-                if conrect[0] < 0 or conrect[1] < 0 or conrect[0] + conrect[2] >= contimage.shape[1] or \
-                    conrect[1] + conrect[3] >= contimage.shape[0] or conrect[2] < (
-                        contimage.shape[1] / 3) or conrect[3] < (contimage.shape[0] / 3):
+                if conrect[0] < 0 or conrect[1] < 0 or conrect[0] + conrect[2] >= rectimage.shape[1] or \
+                    conrect[1] + conrect[3] >= rectimage.shape[0] or conrect[2] < (
+                        rectimage.shape[1] / 3) or conrect[3] < (rectimage.shape[0] / 3):
                     print 'fitted shape in contact with border or excedes'
                     continue
                 else:
@@ -1122,6 +1142,12 @@ class ProcessPicThread(multiprocessing.Process):
         return False, None
 
     def fitelliponcontour(self, contour):
+        # scale=len(contour)//50
+        # if scale>1:
+        #     tofit = np.copy(contour[::scale, ::1, ::1])
+        # else:
+        #     tofit = contour
+        # box = cv2.fitEllipse(tofit)
         box = cv2.fitEllipse(contour)
         # print box
         epar = config.EllipPar()
