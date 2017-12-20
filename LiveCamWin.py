@@ -34,7 +34,7 @@ class LiveCamWin(wx.Frame):
         self.status.SetFieldsCount(2)
         self.status.SetStatusWidths([-1, 65])
 
-        wx.EVT_CLOSE(self, self.onclose)
+        self.Bind(wx.EVT_CLOSE, self.onclose)
 
         # startwerte
         self.caminterface = None
@@ -700,14 +700,14 @@ class WinCamBmpPaintThread(threading.Thread):
         scaledimg = cv2.resize(img, (panelwidth, panelheight))
         if len(scaledimg.shape) >= 3:
             row, col, x = scaledimg.shape
-            bitmap = wx.BitmapFromBuffer(col, row, scaledimg)
+            bitmap = wx.Bitmap.FromBuffer(col, row, scaledimg)
             dc.DrawBitmap(bitmap, 0, 0, False)
         else:
             row, col = scaledimg.shape
             # test=np.zeros((row,col), dtype=np.uint8)
             # print scaledimg.dtype
             test = cv2.cvtColor(scaledimg, cv2.COLOR_GRAY2RGB)
-            bitmap = wx.BitmapFromBuffer(col, row, test)
+            bitmap = wx.Bitmap.FromBuffer(col, row, test)
             dc.DrawBitmap(bitmap, 0, 0, False)
         
 

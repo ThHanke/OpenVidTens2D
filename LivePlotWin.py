@@ -52,8 +52,8 @@ class LivePlotWin(wx.Frame):
         self.stopbutton = wx.BitmapButton(self.buttonpanel, wx.ID_ANY,
                                           wx.Image('Stopupsmall.png', wx.BITMAP_TYPE_PNG).ConvertToBitmap(),
                                           style=wx.BU_EXACTFIT)
-        self.startbutton.SetBitmapSelected(wx.Image('Startdownsmall.png', wx.BITMAP_TYPE_PNG).ConvertToBitmap())
-        self.stopbutton.SetBitmapSelected(wx.Image('Stopdownsmall.png', wx.BITMAP_TYPE_PNG).ConvertToBitmap())
+        #self.startbutton.SetBitmapSelected(wx.Image('Startdownsmall.png', wx.BITMAP_TYPE_PNG).ConvertToBitmap())
+        #self.stopbutton.SetBitmapSelected(wx.Image('Stopdownsmall.png', wx.BITMAP_TYPE_PNG).ConvertToBitmap())
         self.clearbutton = wx.Button(self.buttonpanel, wx.ID_ANY, 'CLEAR', size=(60, 28), style=wx.BU_EXACTFIT)
         self.usbmodulbox = wx.Choice(self.buttonpanel, wx.ID_ANY, choices=('None',))
         if LABJACKDRIVER:
@@ -78,9 +78,9 @@ class LivePlotWin(wx.Frame):
         self.splitter.SetMinimumPaneSize(50)
         self.panel = wx.Panel(self.splitter, wx.ID_ANY, size=(500, 500), style=wx.BORDER_SUNKEN)
         self.plotter = plot.PlotCanvas(self.panel)
-        self.plotter.SetEnableLegend(True)
-        self.plotter.SetXSpec('min')
-        self.plotter.SetYSpec('min')
+        self.plotter.enableLegend=True
+        self.plotter.xSpec='min'
+        self.plotter.ySpec='min'
 
         self.toqueue = list()
         self.itemlist = list()

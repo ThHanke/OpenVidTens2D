@@ -735,7 +735,7 @@ class ProcessPicThread(multiprocessing.Process):
             self.replot = False
             # Frame is done let WinTrack know
             #comment out massiv framedrop and not necessary pipe is flooded with spam
-            #self.pipeend.send('Frame processed!')
+            self.pipeend.send('Frame processed!')
 
     def drawoptflow(self, img, flow, step=16):
         h, w = img.shape[:2]
@@ -909,7 +909,7 @@ class ProcessPicThread(multiprocessing.Process):
                 scale=flowrect[2]//20
                 oldimg = self.oldimage[flowrect[1]:flowrect[1] + flowrect[3]:scale, flowrect[0]:flowrect[0] + flowrect[2]:scale]
                 newimg = self.raw[flowrect[1]:flowrect[1] + flowrect[3]:scale, flowrect[0]:flowrect[0] + flowrect[2]:scale]
-                print oldimg.shape
+                #print oldimg.shape
                 # print 'got views'
                 # print (clock() - start) * 1000
                 flow = cv2.calcOpticalFlowFarneback(oldimg, newimg, None, 0.5, 3, 15, 3, 5, 1.2, 0)
@@ -1498,7 +1498,7 @@ class WinTrackBmpPaintThread(threading.Thread):
             scaledimg = cv2.resize(img, (panelwidth, panelheight))
 
         row, col= scaledimg.shape[0],scaledimg.shape[1]
-        bitmap = wx.BitmapFromBuffer(col, row, scaledimg)
+        bitmap = wx.Bitmap.FromBuffer(col, row, scaledimg)
         dc.DrawBitmap(bitmap, 0, 0, False)
 
     def getaabbellip(self, ellip):
