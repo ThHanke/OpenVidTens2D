@@ -23,14 +23,14 @@ class VideoWriterProcess(Process):
                 if self.videowriter is not None:
                     self.videowriter.release()
                     while self.videowriter.isOpened():
-                        print 'wait till videowriter is released'
+                        print('wait till videowriter is released')
                         pass
-                print 'i have been terminated'
+                print('i have been terminated')
                 break
 
             else:
                 if self.videowriter is None:
-                    print 'open video writer'
+                    print('open video writer')
                     self.videowriter = VideoWriter(self.filename + '.' + str(self.videofilepart).rjust(2, '0') + '.avi',
                                                    self.fourcc, 30, (msg.shape[1], msg.shape[0]), isColor=False)
                     # self.videowriter.open(self.filename+'.'+str(self.videofilepart).rjust(2,'0')+'.avi',fourcc,30,(self.raw.shape[1],self.raw.shape[0]),isColor=False)
@@ -44,12 +44,12 @@ class VideoWriterProcess(Process):
                 if filesize >= 2000000000:  # 4GB
                     self.videowriter.release()
                     while self.videowriter.isOpened():
-                        print 'wait till videowriter is released'
+                        print('wait till videowriter is released')
                         pass
                     self.videofilepart += 1
                     self.videowriter.open(self.filename + '.' + str(self.videofilepart).rjust(2, '0') + '.avi',
                                           self.fourcc, 30, (msg.shape[1], msg.shape[0]), isColor=False)
                     while not self.videowriter.isOpened():
-                        print 'wait till videowriter is ready'
+                        print('wait till videowriter is ready')
                 self.videowriter.write(msg)
 

@@ -2,7 +2,7 @@
 import threading
 import math
 import pickle
-import Queue
+import queue
 import multiprocessing
 from multiprocessing.pool import ThreadPool
 
@@ -594,7 +594,7 @@ class ProcessPicThread(multiprocessing.Process):
                     else:
                         self.oldimage = np.copy(imagetuple[1])
                     self.raw = np.copy(imagetuple[1])
-                except Queue.Empty:
+                except queue.Empty:
                     #print 'no pic: i continue'
                     continue
 
@@ -721,16 +721,17 @@ class ProcessPicThread(multiprocessing.Process):
             try:
                 self.bmpqueue.put(
                     (self.timestamp, self.image, self.newelliplist, self.newconnectlist, self.actframecount), False)
-            except Queue.Full:
+            except queue.Full:
                 #print 'toplotqueue1 full'
                 pass
 
             # show in winplot - put it to winplotqueue
-            try:
-                self.out_queue2.put((self.timestamp, self.image, self.newelliplist, self.newconnectlist), False)
-            except Queue.Full:
-                #print 'toplotqueue2 full'
-                pass
+            self.out_queue2.put((self.timestamp, self.image, self.newelliplist, self.newconnectlist), False)
+##            try:
+##                self.out_queue2.put((self.timestamp, self.image, self.newelliplist, self.newconnectlist), False)
+##            except queue.Full:
+##                #print 'toplotqueue2 full'
+##                pass
 
             self.replot = False
             # Frame is done let WinTrack know
@@ -977,7 +978,7 @@ class ProcessPicThread(multiprocessing.Process):
             scale=1
             rectimage, searchrect = self.getsearchcounturimage(image, rect,scale)
             if not isinstance(rectimage, np.ndarray):
-                print 'no image returned from getsearchcounturimage'
+                print('no image returned from getsearchcounturimage')
                 continue
 
             # if cv2.countNonZero(rectimage)<=10:
@@ -995,14 +996,14 @@ class ProcessPicThread(multiprocessing.Process):
             for contour in contours:
                 i+=1
                 if len(contour) <= 5:
-                    print 'too few countour points'
+                    print('too few countour points')
                     continue
 
                 if cv2.contourArea(contour) <= (rectimage.shape[1] * rectimage.shape[0] / 50):
-                    print 'contour area to small'
+                    print('contour area to small')
                     continue
                 if cv2.contourArea(contour) > (rectimage.shape[1] * rectimage.shape[0]):
-                    print 'contour area to big'
+                    print('contour area to big')
                     continue
 
                 # find bounding box of contour
@@ -1014,7 +1015,7 @@ class ProcessPicThread(multiprocessing.Process):
                 #print i
                 arcscale=cv2.arcLength(contour,True)/(2*(conrect[2]+conrect[3]))
                 if arcscale>=0.9 or arcscale<0.3:
-                    print 'skipped'
+                    print('skipped')
                     continue
 
 
@@ -1028,7 +1029,7 @@ class ProcessPicThread(multiprocessing.Process):
                 if conrect[0] < 0 or conrect[1] < 0 or conrect[0] + conrect[2] >= rectimage.shape[1] or \
                     conrect[1] + conrect[3] >= rectimage.shape[0] or conrect[2] < (
                         rectimage.shape[1] / 3) or conrect[3] < (rectimage.shape[0] / 3):
-                    print 'fitted shape in contact with border or excedes'
+                    print('fitted shape in contact with border or excedes')
                     continue
                 else:
                     # define Number
@@ -1297,7 +1298,7 @@ class ProcessPicThread(multiprocessing.Process):
     def getsearchcounturimage(self, image, rect,scale=1):
         # check subrect is in image
         if not self.checksubrect(image, rect):
-            print 'checksubrect failed'
+            print('checksubrect failed')
             return None, rect
         else:
             # print 'copy subimage'

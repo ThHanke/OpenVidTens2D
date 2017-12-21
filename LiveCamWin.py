@@ -1,7 +1,7 @@
 import os
 import threading
-import Queue
-import VideoCapture
+import queue
+#import VideoCapture
 from time import clock
 #from time import sleep
 
@@ -42,10 +42,10 @@ class LiveCamWin(wx.Frame):
         self.fileismovie = False
         self.datatoqueue = list()
 
-        self.aquirequeue = Queue.Queue(5)
+        self.aquirequeue = queue.Queue(5)
         self.totrackqueue = totrackqueue
         self.pipetotrack = pipetotrack
-        self.bmppaintqueue = Queue.LifoQueue(1)
+        self.bmppaintqueue = queue.LifoQueue(1)
 
         self.lasttime = 0
         self.acttime = 0
@@ -57,6 +57,7 @@ class LiveCamWin(wx.Frame):
         self.pollpipetotracktimer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.pollpipetotrack, self.pollpipetotracktimer)
         self.pollpipetotracktimer.Start(20)
+        self.ScaledImg = np.zeros((100, 100, 3), dtype=np.uint8)
 
         self.initcam()
 
@@ -75,13 +76,13 @@ class LiveCamWin(wx.Frame):
         self.Bind(wx.EVT_MENU, self.vidcapsetcamera, id=ID_CAM)
         self.Bind(wx.EVT_MENU, self.setfilemode, id=ID_FILE)
 
-        if isinstance(self.caminterface, VideoCapture.Device):
-            configmenu = wx.Menu()
-            self.Menubar.Append(configmenu, '&Config')
-            configmenu.Append(ID_CPROP, '&Properties', 'Camera Properties')
-            self.Bind(wx.EVT_MENU, self.vidcapproperties, id=ID_CPROP)
-            configmenu.Append(ID_CNEXT, '&Next CAM', 'next Camera')
-            self.Bind(wx.EVT_MENU, self.initcam, id=ID_CNEXT)
+##        if isinstance(self.caminterface, VideoCapture.Device):
+##            configmenu = wx.Menu()
+##            self.Menubar.Append(configmenu, '&Config')
+##            configmenu.Append(ID_CPROP, '&Properties', 'Camera Properties')
+##            self.Bind(wx.EVT_MENU, self.vidcapproperties, id=ID_CPROP)
+##            configmenu.Append(ID_CNEXT, '&Next CAM', 'next Camera')
+##            self.Bind(wx.EVT_MENU, self.initcam, id=ID_CNEXT)
 
         if self.isfileinterface:
             operate = wx.Menu()
@@ -125,16 +126,16 @@ class LiveCamWin(wx.Frame):
                             self.goingthrough = False
 
     def cleanupbeforeinterfaceswitch(self):
-        if isinstance(self.caminterface, VideoCapture.Device):
-            # print 'stop aquiring'
-            self.aquirequeue.put((self, self.caminterface, True))
-            # print 'stopped aquiring'
-            del self.caminterface
-            self.caminterface = None
+##        if isinstance(self.caminterface, VideoCapture.Device):
+##            # print 'stop aquiring'
+##            self.aquirequeue.put((self, self.caminterface, True))
+##            # print 'stopped aquiring'
+##            del self.caminterface
+##            self.caminterface = None
         if self.caminterface is not None:
-            print 'stop aquiring'
+            print('stop aquiring')
             self.aquirequeue.put((self, self.caminterface, True))
-            print 'stopped aquiring'
+            print('stopped aquiring')
             # self.caminterface.release()
             del self.caminterface
             self.caminterface = None
@@ -188,12 +189,12 @@ class LiveCamWin(wx.Frame):
         # DirectShowDevice
         #return False
 
-        if isinstance(self.caminterface, VideoCapture.Device):
-            print 'cam active'
-            for i in range(0, 2):
-                nextcam = VideoCapture.Device(i)
-                if self.caminterface != nextcam:
-                    self.caminterface = nextcam
+##        if isinstance(self.caminterface, VideoCapture.Device):
+##            print('cam active')
+##            for i in range(0, 2):
+##                nextcam = VideoCapture.Device(i)
+##                if self.caminterface != nextcam:
+##                    self.caminterface = nextcam
 
         self.cleanupbeforeinterfaceswitch()
         self.isfileinterface = False
@@ -203,11 +204,11 @@ class LiveCamWin(wx.Frame):
                     self.caminterface = VideoCapture.Device(i)
                     # print 'a'
                     test = self.caminterface.getImage()
-                    print test.size
+                    print(test.size)
                     # self.caminterface.setResolution(1000,1000)
                     break
                 except:
-                    print 'oh no no camera interface failed'
+                    print('oh no no camera interface failed')
                     self.caminterface = None
                     continue
             if self.caminterface is None:
@@ -259,13 +260,13 @@ class LiveCamWin(wx.Frame):
 
         width = self.caminterface.get(cv2.CAP_PROP_FRAME_WIDTH)
         height = self.caminterface.get(cv2.CAP_PROP_FRAME_HEIGHT)
-        print self.caminterface.get(cv2.CAP_PROP_FORMAT)
-        print self.caminterface.get(cv2.CAP_PROP_FPS)
-        print self.caminterface.get(cv2.CAP_PROP_FRAME_COUNT)
-        print self.caminterface.get(cv2.CAP_PROP_MODE)
-        print self.caminterface.get(cv2.CAP_PROP_GAIN)
+        #print(self.caminterface.get(cv2.CAP_PROP_FORMAT))
+        #print self.caminterface.get(cv2.CAP_PROP_FPS)
+        #print self.caminterface.get(cv2.CAP_PROP_FRAME_COUNT)
+        #print self.caminterface.get(cv2.CAP_PROP_MODE)
+        #print self.caminterface.get(cv2.CAP_PROP_GAIN)
 
-        print width, height
+        #print width, height
 
         self.ScaledImg = np.zeros((100, 100, 3), dtype=np.uint8)
 
@@ -325,8 +326,9 @@ class LiveCamWin(wx.Frame):
         self.goingthrough = False
         QueuePicThread(self.aquirequeue, self.bmppaintqueue, self.totrackqueue)
         WinCamBmpPaintThread(self.bmppaintqueue, self.panel)
-
         self.Layout()
+        self.aquirequeue.put((0.0, self.ScaledImg, False), False)
+        self.aquirequeue.put((0.0, self.ScaledImg, False), False)
 
         self.createmenu()
         return True
@@ -402,12 +404,12 @@ class LiveCamWin(wx.Frame):
         self.SetStatusText(moviepath)
         self.filecapture = cv2.VideoCapture(moviepath)
         piccount = int(self.filecapture.get(cv2.CAP_PROP_FRAME_COUNT))
-        print self.filecapture.get(cv2.CAP_PROP_FORMAT)
-        print self.filecapture.get(cv2.CAP_PROP_FOURCC)
+        #print self.filecapture.get(cv2.CAP_PROP_FORMAT)
+        #print self.filecapture.get(cv2.CAP_PROP_FOURCC)
         # next print must be called except image while be tiled
 
-        print str(self.filecapture.get(cv2.CAP_PROP_FRAME_WIDTH)) + 'x' + str(
-            self.filecapture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        print(str(self.filecapture.get(cv2.CAP_PROP_FRAME_WIDTH)) + 'x' + str(
+            self.filecapture.get(cv2.CAP_PROP_FRAME_HEIGHT)))
         self.imageslider.SetMin(1)
         self.imageslider.SetMax(piccount - 1)
         self.imageslider.SetValue(piccount)
@@ -460,7 +462,7 @@ class LiveCamWin(wx.Frame):
         try:
             del self.caminterface
         except:
-            print 'cant close cam interface'
+            print('cant close cam interface')
             pass
         for item in self.childs:
             item.onclose(True)
@@ -476,7 +478,6 @@ class QueuePicThread(threading.Thread):
         self.aquirequeue = aquirequeue
         self.bmppaintqueue = bmppaintqueue
         self.totrackqueue = totrackqueue
-
         self.setDaemon(True)
         self.start()
         # start the thread
@@ -497,15 +498,17 @@ class QueuePicThread(threading.Thread):
             else:
                 self.gray = image
                 #print 'is gray'
-            try:
-                self.bmppaintqueue.put(image, False)
-            except Queue.Full:
-                pass
-                print 'winCam1 bmppaintqueue is full'
+            self.bmppaintqueue.put(image, False)
+
+##            try:
+##                self.bmppaintqueue.put(image, False)
+##            except queue.Full:
+##                pass
+##                print('winCam1 bmppaintqueue is full')
 
             try:
                 self.totrackqueue.put((self.timestamp, self.gray), False)
-            except Queue.Full:
+            except queue.Full:
                 pass
                 # print 'totrackqueue is full'
 
@@ -572,14 +575,14 @@ class VidCapQueuePicThread(threading.Thread):
                         # self.totrackqueue.put((self.timestamp,(self.raw.tostring(),self.raw.width,self.raw.height)),False)
                         self.totrackqueue.put((self.timestamp, self.gray), False)
                         # print self.timestamp
-                    except Queue.Full:
+                    except queue.Full:
                         pass
-                        print 'totrackqueue is full'
+                        print('totrackqueue is full')
 
                     try:
                         # self.bmppaintqueue.put((temp),False)
                         self.bmppaintqueue.put(temp_np, False)
-                    except Queue.Full:
+                    except queue.Full:
                         pass
                         # print 'winCam bmppaintqueue3 is full'
                 else:
@@ -608,7 +611,7 @@ class CVCapQueuePicThread(threading.Thread):
 
         self.setDaemon(True)
         self.start()
-        print 'thread started'
+        print('thread started')
         # start the thread
 
     def run(self):
@@ -648,14 +651,14 @@ class CVCapQueuePicThread(threading.Thread):
                         # self.totrackqueue.put((self.timestamp,(self.raw.tostring(),self.raw.width,self.raw.height)),False)
                         self.totrackqueue.put((self.timestamp, self.gray), False)
                         # print self.timestamp
-                    except Queue.Full:
+                    except queue.Full:
                         pass
                         # print 'totrackqueue is full'
 
                     try:
                         # self.bmppaintqueue.put((temp),False)
                         self.bmppaintqueue.put(temp_np, False)
-                    except Queue.Full:
+                    except queue.Full:
                         pass
                         # print 'winCam bmppaintqueue3 is full'
 

@@ -1,13 +1,13 @@
 # -*- coding: cp1252 -*-
 import wx
 import threading
-import Queue
+import queue
 import multiprocessing
 
 try:
     import u12
 except:
-    print 'LabJack U12 driver not found'
+    print('LabJack U12 driver not found')
     LABJACKDRIVER = False
 else:
     LABJACKDRIVER = True
@@ -15,7 +15,7 @@ else:
 try:
     import u3
 except:
-    print 'LabJack U3 driver not found'
+    print('LabJack U3 driver not found')
     LABJACKDRIVER = False
 else:
     LABJACKDRIVER = True
@@ -399,7 +399,7 @@ class DataProtoProcess(multiprocessing.Process):
 
                 if self.tofile:
                     if not os.path.isfile(self.filename):
-                        print 'open file'
+                        print('open file')
                         self.fp = open(self.filename, 'w', 0)
                         self.writedatahead(self.fp, self.availabledatalist)
                 else:
