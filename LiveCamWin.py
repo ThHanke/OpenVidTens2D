@@ -147,28 +147,28 @@ class LiveCamWin(wx.Frame):
             if isinstance(item, VidCapQueuePicThread):
                 # print 'found one! kill it!'
                 self.aquirequeue.put((self, None, True))
-                wx.Usleep(100)
+                wx.MilliSleep(100)
                 #sleep(0.1)
                 self.aquirequeue.queue.clear()
                 # print self.aquirequeue.queue
             if isinstance(item, CVCapQueuePicThread):
                 # print 'found one! kill it!'
                 self.aquirequeue.put((self, None, True))
-                wx.Usleep(100)
+                wx.MilliSleep(100)
                 #sleep(0.1)
                 self.aquirequeue.queue.clear()
                 # print self.aquirequeue.queue
             if isinstance(item, QueuePicThread):
                 # print 'found one! kill it!'
                 self.aquirequeue.put((None, None, True))
-                wx.Usleep(100)
+                wx.MilliSleep(100)
                 #sleep(0.1)
                 self.aquirequeue.queue.clear()
                 # print self.aquirequeue.queue
             if isinstance(item, WinCamBmpPaintThread):
                 # print 'found one! kill it!'
                 self.bmppaintqueue.put(None)
-                wx.Usleep(100)
+                wx.MilliSleep(100)
                 #sleep(0.1)
                 self.aquirequeue.queue.clear()
 
@@ -457,7 +457,7 @@ class LiveCamWin(wx.Frame):
     def onclose(self, event):
         if self.caminterface is not None:
             self.aquirequeue.put((self, None, False), False)
-            wx.Usleep(300)
+            wx.MilliSleep(300)
             #sleep(0.3)
         try:
             del self.caminterface
@@ -587,7 +587,7 @@ class VidCapQueuePicThread(threading.Thread):
                         # print 'winCam bmppaintqueue3 is full'
                 else:
                     pass
-                    #wx.Usleep(30)
+                    #wx.MilliSleep(30)
 
 
 
@@ -712,7 +712,3 @@ class WinCamBmpPaintThread(threading.Thread):
             test = cv2.cvtColor(scaledimg, cv2.COLOR_GRAY2RGB)
             bitmap = wx.Bitmap.FromBuffer(col, row, test)
             dc.DrawBitmap(bitmap, 0, 0, False)
-        
-
-
-

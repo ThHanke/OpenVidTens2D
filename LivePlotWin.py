@@ -369,38 +369,38 @@ class DataProtoProcess(multiprocessing.Process):
                             par = config.EllipPar()
                             par = self.itemlist[listpos]
                             self.availabledatalist.append(
-                                (unicode('Ellipse'), unicode(str(par.Num)), unicode('MidPos x')))
+                                (('Ellipse'), (str(par.Num)), ('MidPos x')))
                             self.availabledatalist.append(
-                                (unicode('Ellipse'), unicode(str(par.Num)), unicode('MidPos y')))
+                                (('Ellipse'), (str(par.Num)), ('MidPos y')))
                             self.availabledatalist.append(
-                                (unicode('Ellipse'), unicode(str(par.Num)), unicode('Size a')))
+                                (('Ellipse'), (str(par.Num)), ('Size a')))
                             self.availabledatalist.append(
-                                (unicode('Ellipse'), unicode(str(par.Num)), unicode('Size b')))
-                            self.availabledatalist.append((unicode('Ellipse'), unicode(str(par.Num)), unicode('Angle')))
+                                (('Ellipse'), (str(par.Num)), ('Size b')))
+                            self.availabledatalist.append((('Ellipse'), (str(par.Num)), ('Angle')))
 
                         if isinstance(self.itemlist[listpos], config.LinePar):
                             # print  "is connect"
                             par = config.LinePar()
                             par = self.itemlist[listpos]
                             self.availabledatalist.append(
-                                (unicode('Connection'), unicode(str(par.Num)), unicode('Range x')))
+                                (('Connection'), (str(par.Num)), ('Range x')))
                             self.availabledatalist.append(
-                                (unicode('Connection'), unicode(str(par.Num)), unicode('Range y')))
+                                (('Connection'), (str(par.Num)), ('Range y')))
                             self.availabledatalist.append(
-                                (unicode('Connection'), unicode(str(par.Num)), unicode('Lenght')))
+                                (('Connection'), (str(par.Num)), ('Lenght')))
 
                         if item == 'LabJack U12':
-                            self.availabledatalist.append((unicode('LabJack U12'), unicode('Analog'), unicode('Diff1')))
-                            self.availabledatalist.append((unicode('LabJack U12'), unicode('Analog'), unicode('Diff2')))
+                            self.availabledatalist.append((('LabJack U12'), ('Analog'), ('Diff1')))
+                            self.availabledatalist.append((('LabJack U12'), ('Analog'), ('Diff2')))
                         if item == 'LabJack U3':
-                            self.availabledatalist.append((unicode('LabJack U3'), unicode('Analog'), unicode('Diff1')))
-                            self.availabledatalist.append((unicode('LabJack U3'), unicode('Analog'), unicode('Diff2')))
+                            self.availabledatalist.append((('LabJack U3'), ('Analog'), ('Diff1')))
+                            self.availabledatalist.append((('LabJack U3'), ('Analog'), ('Diff2')))
 
 
                 if self.tofile:
                     if not os.path.isfile(self.filename):
                         print('open file')
-                        self.fp = open(self.filename, 'w', 0)
+                        self.fp = open(self.filename, 'w')
                         self.writedatahead(self.fp, self.availabledatalist)
                 else:
                     if self.fp:
@@ -556,7 +556,7 @@ class DataProtoProcess(multiprocessing.Process):
 
             try:
                 self.resultqueue.put((self.plotmarkerlist, self.elliplist, self.connectlist), False)
-            except Queue.Full:
+            except queue.Full:
                 # print 'WinPlot bmppaint thread is busy'
                 pass
 
