@@ -23,7 +23,7 @@ else:
 import os
 import wx.lib.plot as plot
 
-from time import clock
+from time import perf_counter
 
 # import globals
 import config
@@ -96,7 +96,7 @@ class LivePlotWin(wx.Frame):
         self.fp = None
         self.count = 0
         self.called = 0
-        self.plotstarttime = clock()
+        self.plotstarttime = perf_counter()
         self.childs = list()
 
         self.tree = wx.TreeCtrl(self.splitter, style=wx.TR_HIDE_ROOT + wx.TR_MULTIPLE)
@@ -169,7 +169,7 @@ class LivePlotWin(wx.Frame):
 
         # self.SetStatusText('Capturing - freezing Selection ')
         self.pipetotrack.send(('Capturing', self.filename))
-        self.capturestarttime = clock()
+        self.capturestarttime = perf_counter()
         # self.data=list()
         # print 'send to background data process'
         self.sendstatustobackgroundprocess()

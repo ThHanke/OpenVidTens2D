@@ -2,13 +2,12 @@ import os
 import threading
 import queue
 #import VideoCapture
-from time import clock
-#from time import sleep
 
 import wx
 import cv2
 import numpy as np
 
+from time import perf_counter
 
 # import globals
 import config
@@ -253,6 +252,7 @@ class LiveCamWin(wx.Frame):
     def initopencvcamera(self):
 
         # return False
+        print('opening cv2 Camera Interface')
         self.caminterface = cv2.VideoCapture(0)
         if not self.caminterface.isOpened():
             self.SetStatusText('OpenCVCamera Initilization failed')
@@ -434,7 +434,7 @@ class LiveCamWin(wx.Frame):
             #print temp.dtype
             self.image = np.copy(temp)
             #print self.image.dtype,self.image.shape
-            self.acttime = clock()
+            self.acttime = perf_counter()
         else:
             from os.path import abspath, join
 
@@ -445,7 +445,7 @@ class LiveCamWin(wx.Frame):
             self.image = cv2.imread(imagepath, 3)
             self.image = cv2.cvtColor(self.image, cv2.COLOR_BGR2RGB)
 
-            self.acttime = clock()
+            self.acttime = perf_counter()
 
         # print 'send file to aquire'
         self.aquirequeue.put((self.imageslider.GetValue(), self.image, False), False)
@@ -456,9 +456,11 @@ class LiveCamWin(wx.Frame):
 
     def onclose(self, event):
         if self.caminterface is not None:
+            print('closing camera interface')
             self.aquirequeue.put((self, None, False), False)
             wx.MilliSleep(300)
             #sleep(0.3)
+            self.caminterface.release()
         try:
             del self.caminterface
         except:
@@ -555,7 +557,7 @@ class VidCapQueuePicThread(threading.Thread):
                 newhash = hash(rawdata)
                 if newhash != self.lasthash:
                     self.lasthash = newhash
-                    self.timestamp = clock()
+                    self.timestamp = perf_counter()
 
                     if self.timestamp - self.lasttime < 1:
                         self.framecount += 1
@@ -626,12 +628,12 @@ class CVCapQueuePicThread(threading.Thread):
             if self.plsexit:
                 # print 'vidcap is exiting'
                 break
-            if self.caminterface is not None:
+            if self.caminterface is not None and self.caminterface.isOpened():
                 ret, newdata = self.caminterface.read()  # datastring, width, height
                 # print ret
                 if newdata is not rawdata:
                     rawdata = newdata
-                    self.timestamp = clock()
+                    self.timestamp = perf_counter()
 
                     if self.timestamp - self.lasttime < 1:
                         self.framecount += 1

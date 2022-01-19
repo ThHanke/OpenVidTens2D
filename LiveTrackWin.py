@@ -16,7 +16,7 @@ import VideoWriter
 import config
 
 # from time import sleep
-from time import clock
+from time import perf_counter
 
 ID_CCAL = wx.NewId()
 ID_CCALL = wx.NewId()
@@ -600,7 +600,7 @@ class ProcessPicThread(multiprocessing.Process):
 
 			temp = np.copy(self.raw)
 
-			self.acttime = clock()
+			self.acttime = perf_counter()
 			if self.framerate=='max':
 				if self.acttime - self.lasttime < 1:
 					self.framecount += 1
@@ -726,7 +726,7 @@ class ProcessPicThread(multiprocessing.Process):
 				pass
 
 			# show in winplot - put it to winplotqueue
-			print('putting new element to winplot')
+			# print('putting new element to winplot')
 			#self.out_queue2.put((self.timestamp, self.image, self.newelliplist, self.newconnectlist), False)
 			try:
 			   self.out_queue2.put((self.timestamp, self.image, self.newelliplist, self.newconnectlist), False)
@@ -868,7 +868,7 @@ class ProcessPicThread(multiprocessing.Process):
 		# print len(ellipses)
 		tasklist = list()
 		# print 'start tracking'
-		# start = clock()
+		# start = perf_counter()
 		for listpos, item in enumerate(ellipses):
 			# print 'track ellip'
 
@@ -907,17 +907,17 @@ class ProcessPicThread(multiprocessing.Process):
 				#     self.raw[flowrect[1]:flowrect[1] + flowrect[3], flowrect[0]:flowrect[0] + flowrect[2]], None,
 				#     fx=0.25, fy=0.25)
 				# print 'get views for flow'
-				# print (clock() - start) * 1000
+				# print (perf_counter() - start) * 1000
 				#only get reduced size
 				scale=flowrect[2]//20
 				oldimg = self.oldimage[flowrect[1]:flowrect[1] + flowrect[3]:scale, flowrect[0]:flowrect[0] + flowrect[2]:scale]
 				newimg = self.raw[flowrect[1]:flowrect[1] + flowrect[3]:scale, flowrect[0]:flowrect[0] + flowrect[2]:scale]
 				#print oldimg.shape
 				# print 'got views'
-				# print (clock() - start) * 1000
+				# print (perf_counter() - start) * 1000
 				flow = cv2.calcOpticalFlowFarneback(oldimg, newimg, None, 0.5, 3, 15, 3, 5, 1.2, 0)
 				# print 'calculated opt flow'
-				# print (clock() - start) * 1000
+				# print (perf_counter() - start) * 1000
 
 				# x,y=int(newimg.shape[1]/2),int(newimg.shape[0]/2)
 				# fx, fy = flow[y,x].T
@@ -939,7 +939,7 @@ class ProcessPicThread(multiprocessing.Process):
 				firstsearchrect = (int(ellip.MidPos[0] - b / 2), int(ellip.MidPos[1] - h / 2), int(b), int(h))
 				rectlist = self.searchrectlist(firstsearchrect, (0, 0))
 			# print 'calculated flows'
-			# print (clock()-start)*1000
+			# print (perf_counter()-start)*1000
 			task = self.threadpool.apply_async(self.findellip, (rectlist, ellip, image))
 			tasklist.append(task)
 		##            ellipnew=self.findellip(rectlist,ellip,image)
@@ -953,7 +953,7 @@ class ProcessPicThread(multiprocessing.Process):
 		##                pass
 		##
 		# print 'tasks set'
-		# print (clock()-start)*1000
+		# print (perf_counter()-start)*1000
 		for task in tasklist:
 			#task.wait()  # wait till task is completed and result available
 			# print task.get()
@@ -970,7 +970,7 @@ class ProcessPicThread(multiprocessing.Process):
 
 		# print 'copy list'
 		# print 'got all results'
-		# print (clock()-start)*1000
+		# print (perf_counter()-start)*1000
 		return elliplistnew, image
 
 	def findellip(self, rectlist, ellip, image):
