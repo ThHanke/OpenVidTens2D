@@ -133,8 +133,7 @@ class LivePlotWin(wx.Frame):
 
         self.splitter.SetSize(self.GetClientSize())
         size = self.GetSize()
-        self.splitter.SetSashPosition(size.x / 5)
-
+        self.splitter.SetSashPosition(int(size.x / 5))
         self.Layout()
         self.Show()
 
@@ -418,7 +417,7 @@ class DataProtoProcess(multiprocessing.Process):
             if USBModul == 'LabJack U3':
                 # print 'get first device'
                 self.USBdevice = u3.U3()
-            if USBModul is 'None' and self.USBdevice is not None:
+            if USBModul is 'None' and not self.USBdevice:
                 self.USBdevice = None
             if plsexit:
                 # print 'killing myself'
